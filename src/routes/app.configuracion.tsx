@@ -4,7 +4,7 @@
 // cabecera, factura y vista cliente. Todo local y simulado.
 
 import { useRef, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Upload, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/base/PageHeader";
@@ -35,15 +35,6 @@ export const Route = createFileRoute("/app/configuracion")({
 });
 
 const CURRENCIES = ["EUR", "MXN", "USD", "GBP", "ARS", "COP", "ZAR"];
-
-const ACCENT_PRESETS = [
-  "#101010",
-  "#1877D6",
-  "#0F766E",
-  "#B45309",
-  "#7C3AED",
-  "#DC2626",
-];
 
 const DAY_LABELS = [
   "Lunes",
@@ -142,7 +133,7 @@ function ConfigPage() {
   const [taxPct, setTaxPct] = useState(
     String(Math.round((tenant?.taxRate ?? 0.21) * 100)),
   );
-  const [accentColor, setAccentColor] = useState(tenant?.accentColor ?? "#101010");
+  const [accentColor] = useState(tenant?.accentColor ?? "#1877d6");
   const [logoUrl, setLogoUrl] = useState<string | undefined>(tenant?.logoUrl);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(
     tenant?.googleReviewUrl ?? "",
@@ -211,9 +202,7 @@ function ConfigPage() {
   };
 
   return (
-    <div
-      style={{ ["--brand-accent" as string]: accentColor } as React.CSSProperties}
-    >
+    <div>
       <PageHeader
         title="Configuración"
         description="Datos del taller, facturación y marca."
@@ -301,46 +290,14 @@ function ConfigPage() {
           </div>
         </Section>
 
-        <Section title="Marca" description="Acento y logotipo del taller.">
-          <Field label="Color de acento">
-            <div className="flex flex-wrap items-center gap-2">
-              {ACCENT_PRESETS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setAccentColor(c)}
-                  className={cn(
-                    "h-8 w-8 rounded-md border-2 transition-colors",
-                    accentColor.toLowerCase() === c.toLowerCase()
-                      ? "border-foreground"
-                      : "border-border",
-                  )}
-                  style={{ backgroundColor: c }}
-                  aria-label={c}
-                />
-              ))}
-              <input
-                type="color"
-                value={accentColor}
-                onChange={(e) => setAccentColor(e.target.value)}
-                className="h-8 w-10 cursor-pointer rounded-md border border-border bg-background"
-                aria-label="Color personalizado"
-              />
-            </div>
-          </Field>
-
-          <div className="flex items-center gap-3 rounded-md border border-border bg-background-subtle p-3">
-            <span
-              className="inline-block h-3 w-3 rounded-full"
-              style={{ backgroundColor: accentColor }}
-            />
-            <span className="text-sm font-medium text-foreground">
-              Vista previa del acento
-            </span>
-            <Button size="sm" className="ml-auto">
-              Ejemplo
-            </Button>
-          </div>
+        <Section title="Marca" description="Logotipo del taller.">
+          <p className="text-sm text-muted-foreground">
+            Los colores de la web y del panel se eligen en{" "}
+            <Link to="/app/web" className="font-medium text-primary hover:underline">
+              Mi web → Diseño
+            </Link>
+            .
+          </p>
 
           <Field label="Logotipo">
             <div className="flex items-center gap-4">
