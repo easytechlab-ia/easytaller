@@ -38,6 +38,7 @@ import {
   websiteWhatsapp,
 } from "@/lib/website";
 import { whatsappUrl } from "@/lib/whatsapp";
+import { accentVars, isDark, useAccentOnRoot } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import type { BusinessDay, Service, Tenant } from "@/types";
 
@@ -146,9 +147,23 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
     [allServices, settings],
   );
 
-  const accentStyle = {
-    ["--brand-accent" as string]: tenant.accentColor,
-  } as React.CSSProperties;
+  const accentStyle = accentVars(tenant.accentColor);
+  useAccentOnRoot(tenant.accentColor);
+
+  // Header: a solid colour or a photo with a dark veil. Text and outline
+  // buttons switch to white or dark depending on the background.
+  const heroPhoto = settings.heroBackground === "photo" && settings.heroPhoto;
+  const heroDark = heroPhoto ? true : isDark(settings.heroColor);
+  const heroStyle: React.CSSProperties = heroPhoto
+    ? {
+        backgroundImage: `linear-gradient(rgba(0,0,0,${settings.heroOverlay / 100}), rgba(0,0,0,${settings.heroOverlay / 100})), url(${settings.heroPhoto})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : { backgroundColor: settings.heroColor };
+  const heroOutline = heroDark
+    ? "h-12 border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white"
+    : "h-12 border-slate-900/20 bg-transparent text-slate-900 hover:bg-slate-900/5 hover:text-slate-900";
 
   const waLink = whatsapp
     ? whatsappUrl(whatsapp, `Hola ${tenant.name}, os escribo desde vuestra web.`)
@@ -169,7 +184,7 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
             {tenant.logoUrl ? (
               <img src={tenant.logoUrl} alt="" className="h-9 w-9 rounded-lg object-contain" />
             ) : (
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-ink)] font-display text-sm font-bold text-white">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-sm font-bold text-primary-foreground">
                 {initials(tenant.name)}
               </span>
             )}
@@ -195,19 +210,24 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
       </header>
 
       {/* Hero */}
-      <section id="inicio" className="relative overflow-hidden bg-[var(--brand-ink)] text-white">
+      <section
+        id="inicio"
+        className={cn("relative overflow-hidden", heroDark ? "text-white" : "text-slate-900")}
+        style={heroStyle}
+      >
         <div className="mx-auto max-w-5xl px-5 pb-14 pt-12 sm:pb-20 sm:pt-16">
           {show.hours && status && (
             <p
               className={cn(
                 "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium",
-                status.open ? "bg-white/10 text-white" : "bg-white/5 text-white/70",
+                heroDark ? "bg-white/10" : "bg-slate-900/5",
+                !status.open && "opacity-80",
               )}
             >
               <span
                 className={cn(
                   "h-2 w-2 rounded-full",
-                  status.open ? "bg-[#4ade80]" : "bg-white/40",
+                  status.open ? "bg-[#22c55e]" : heroDark ? "bg-white/40" : "bg-slate-900/30",
                 )}
               />
               {status.text}
@@ -216,13 +236,13 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
           <h1 className="mt-5 max-w-2xl font-display text-[2.6rem] font-bold leading-[1.02] tracking-tight sm:text-6xl">
             {settings.tagline || tenant.name}
           </h1>
-          <p className="mt-4 max-w-xl text-base text-white/75 sm:text-lg">
+          <p className={cn("mt-4 max-w-xl text-base sm:text-lg", heroDark ? "text-white/80" : "text-slate-700")}>
             Taller mecánico{address ? ` en ${address.split(",").pop()?.replace(/\d{5}/, "").trim()}` : ""}.
             {bookingOn ? " Pide cita online en un minuto y te avisamos en cuanto tu coche esté listo." : ""}
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             {actions.booking && (
-              <Button asChild size="lg" className="h-12 bg-white text-[var(--brand-ink)] hover:bg-white/90">
+              <Button asChild size="lg" className="h-12 shadow-sm">
                 <a href="#cita">
                   <CalendarCheck strokeWidth={1.75} />
                   Pedir cita
@@ -234,7 +254,7 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
                 asChild
                 size="lg"
                 variant="outline"
-                className="h-12 border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                className={heroOutline}
               >
                 <a href={`tel:${phone!.replace(/\s/g, "")}`}>
                   <Phone strokeWidth={1.75} />
@@ -247,7 +267,7 @@ function ShopWebsite({ tenant }: { tenant: Tenant }) {
                 asChild
                 size="lg"
                 variant="outline"
-                className="h-12 border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                className={heroOutline}
               >
                 <a href={waLink} target="_blank" rel="noreferrer">
                   <MessageCircle strokeWidth={1.75} />
