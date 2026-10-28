@@ -1,15 +1,23 @@
-// Talleo — invoice (facturación) domain logic. Generates invoices from a work
-// order's approved quote lines, assigns a per-tenant sequential number and
-// manages the simulated payment status. All persistence goes through the repos;
-// no component touches localStorage directly. 100% local & simulated.
+// EasyTaller — billing data ("Facturación"). EasyTaller does NOT issue
+// invoices: from 2027 invoicing software must comply with Verifactu, so the
+// shop keeps invoicing with its gestoría or its own program. For each finished
+// job we prepare the billing data (customer + NIF, approved lines, base, IVA,
+// total, payment) and the shop sends it by email or as a spreadsheet. Records
+// live in the "invoices" collection (kept for compatibility). All local.
 
-import type { Invoice, Tenant, WorkOrder } from "@/types";
-import { invoicesRepo, vehiclesRepo } from "@/lib/db";
+import type { Customer, Invoice, PaymentMethod, Tenant, Vehicle, WorkOrder } from "@/types";
+import {
+  customersRepo,
+  invoicesRepo,
+  vehiclesRepo,
+  workOrdersRepo,
+} from "@/lib/db";
+import { read, write } from "@/lib/db/storage";
 import { notify } from "@/lib/notifications";
 import { quoteTotals } from "@/lib/orders";
 import { decrementStockForInvoice } from "@/lib/stock";
 
-/** Find the invoice generated for a given work order, if any. */
+/** Find the billing record of a given work order, if any. */
 export function getInvoiceByWorkOrderId(
   tenantId: string,
   workOrderId: string,
@@ -20,12 +28,12 @@ export function getInvoiceByWorkOrderId(
 }
 
 /**
- * Next sequential invoice number for the tenant, scoped to the current year.
- * Format: F-YYYY-NNNN (e.g. F-2026-0001).
+ * Next internal reference for the shop, per year: R-YYYY-NNNN. It is NOT an
+ * invoice number (that one comes from the shop's invoicing program).
  */
 export function nextInvoiceNumber(tenantId: string): string {
   const year = new Date().getFullYear();
-  const prefix = `F-${year}-`;
+  const prefix = `R-${year}-`;
   const existing = invoicesRepo
     .list(tenantId)
     .filter((i) => i.number.startsWith(prefix));
@@ -43,9 +51,9 @@ function vehicleLabel(tenantId: string, vehicleId: string): string {
 }
 
 /**
- * Generate an invoice from a work order, copying only the approved quote lines
- * and computing subtotal/tax/total with the tenant's taxRate. Returns undefined
- * if there are no approved lines. Initial payment status is `pending`.
+ * Prepare the billing data of a work order with its approved lines (base,
+ * IVA and total with the shop's rate). Returns undefined if nothing was
+ * approved. Starts as "to send" and "not collected".
  */
 export function generateInvoiceFromOrder(
   tenant: Tenant,
@@ -74,15 +82,15 @@ export function generateInvoiceFromOrder(
 
   notify(tenant.id, {
     type: "presupuesto",
-    title: "Factura generada",
-    body: `${invoice.number} — ${vehicleLabel(tenant.id, order.vehicleId)}.`,
+    title: "Datos para facturar listos",
+    body: `${vehicleLabel(tenant.id, order.vehicleId)} — listos para enviar a la gestoría.`,
     link: `/app/facturacion/${invoice.id}`,
   });
 
   return invoice;
 }
 
-/** Change the payment status of an invoice. */
+/** Change the payment status of a record. */
 export function setInvoiceStatus(
   tenantId: string,
   invoiceId: string,
@@ -91,8 +99,210 @@ export function setInvoiceStatus(
   return invoicesRepo.update(tenantId, invoiceId, { status });
 }
 
+/** Update payment / billing fields of a record. */
+export function updateBilling(
+  tenantId: string,
+  invoiceId: string,
+  patch: Partial<Pick<Invoice, "status" | "paymentMethod" | "paidAmount" | "sentAt" | "externalNumber">>,
+): Invoice | undefined {
+  return invoicesRepo.update(tenantId, invoiceId, patch);
+}
+
+/** Mark several records as sent to the gestoría now. */
+export function markSent(tenantId: string, ids: string[]): void {
+  const now = new Date().toISOString();
+  for (const id of ids) invoicesRepo.update(tenantId, id, { sentAt: now });
+}
+
 export const INVOICE_STATUS_LABELS: Record<Invoice["status"], string> = {
-  pending: "Pendiente",
-  partial: "Parcial",
-  paid: "Pagada",
+  pending: "Sin cobrar",
+  partial: "Cobro parcial",
+  paid: "Cobrado",
 };
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  efectivo: "Efectivo",
+  tarjeta: "Tarjeta",
+  bizum: "Bizum",
+  transferencia: "Transferencia",
+};
+
+// ---- where each record is ---------------------------------------------------
+
+export type BillingStage = "to_send" | "sent" | "invoiced";
+
+export const BILLING_STAGE_LABELS: Record<BillingStage, string> = {
+  to_send: "Por enviar",
+  sent: "Enviado a la gestoría",
+  invoiced: "Facturado",
+};
+
+export function billingStage(inv: Invoice): BillingStage {
+  if (inv.externalNumber?.trim()) return "invoiced";
+  if (inv.sentAt) return "sent";
+  return "to_send";
+}
+
+// ---- settings: who receives the data ----------------------------------------
+
+export interface BillingSettings {
+  id: string; // = tenantId
+  gestoriaEmail?: string;
+  gestoriaName?: string;
+}
+
+const SETTINGS = "billing";
+
+export function getBillingSettings(tenantId: string): BillingSettings {
+  return read<BillingSettings>(SETTINGS, tenantId)[0] ?? { id: tenantId };
+}
+
+export function saveBillingSettings(tenantId: string, settings: BillingSettings): void {
+  write<BillingSettings>(SETTINGS, tenantId, [{ ...settings, id: tenantId }]);
+}
+
+// ---- records with their customer / car --------------------------------------
+
+export interface BillingRow {
+  invoice: Invoice;
+  order?: WorkOrder;
+  customer?: Customer;
+  vehicle?: Vehicle;
+}
+
+export function billingRows(tenantId: string): BillingRow[] {
+  return invoicesRepo
+    .list(tenantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((invoice) => {
+      const order = workOrdersRepo.getById(tenantId, invoice.workOrderId);
+      return {
+        invoice,
+        order,
+        customer: order ? customersRepo.getById(tenantId, order.customerId) : undefined,
+        vehicle: order ? vehiclesRepo.getById(tenantId, order.vehicleId) : undefined,
+      };
+    });
+}
+
+// ---- export: email text and spreadsheet --------------------------------------
+
+function money(n: number): string {
+  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function day(iso: string): string {
+  return new Date(iso).toLocaleDateString("es-ES");
+}
+
+/** Plain-text block with everything needed to issue the invoice. */
+export function billingText(tenant: Tenant, row: BillingRow): string {
+  const { invoice: inv, customer, vehicle } = row;
+  const taxPct = Math.round(tenant.taxRate * 100);
+  const lines = inv.items.map(
+    (it) => `  - ${it.description}: ${it.qty} x ${money(it.unitPrice)} € = ${money(it.qty * it.unitPrice)} €`,
+  );
+  const paid =
+    inv.status === "paid"
+      ? "Cobrado"
+      : inv.status === "partial"
+        ? `Cobrado en parte (${money(inv.paidAmount ?? 0)} €)`
+        : "Sin cobrar";
+  return [
+    `Ref. ${inv.number} · ${day(inv.createdAt)}`,
+    `Cliente: ${customer?.name ?? "—"}`,
+    `NIF/CIF: ${customer?.taxId?.trim() || "— (particular, sin NIF)"}`,
+    ...(customer?.address?.trim() ? [`Dirección: ${customer.address.trim()}`] : []),
+    `Teléfono: ${customer?.phone ?? "—"}${customer?.email ? ` · ${customer.email}` : ""}`,
+    `Vehículo: ${vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.plate}` : "—"}`,
+    "Conceptos (precios sin IVA):",
+    ...lines,
+    `Base imponible: ${money(inv.subtotal)} €`,
+    `IVA ${taxPct}%: ${money(inv.tax)} €`,
+    `TOTAL: ${money(inv.total)} €`,
+    `Pago: ${paid}${inv.paymentMethod ? ` · ${PAYMENT_METHOD_LABELS[inv.paymentMethod]}` : ""}`,
+  ].join("\n");
+}
+
+/** mailto: link to send the data of one or more jobs to the gestoría. */
+export function billingEmailUrl(tenant: Tenant, rows: BillingRow[], to?: string): string {
+  const n = rows.length;
+  const subject =
+    n === 1
+      ? `Datos para facturar · ${tenant.name} · ${rows[0].invoice.number}`
+      : `Datos para facturar · ${tenant.name} · ${n} trabajos`;
+  const intro =
+    n === 1
+      ? "Hola,\n\nOs pasamos los datos para hacer la factura de este trabajo:"
+      : `Hola,\n\nOs pasamos los datos para hacer las facturas de estos ${n} trabajos:`;
+  const blocks = rows.map((r) => billingText(tenant, r)).join("\n\n────────────\n\n");
+  const body = `${intro}\n\n${blocks}\n\nGracias,\n${tenant.name}`;
+  return `mailto:${encodeURIComponent(to ?? "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+/** Spreadsheet (CSV for Excel, Spanish format) with one row per job. */
+export function billingCsv(tenant: Tenant, rows: BillingRow[]): string {
+  const taxPct = Math.round(tenant.taxRate * 100);
+  const head = [
+    "Referencia",
+    "Fecha",
+    "Cliente",
+    "NIF/CIF",
+    "Dirección",
+    "Teléfono",
+    "Email",
+    "Vehículo",
+    "Matrícula",
+    "Conceptos",
+    "Base imponible",
+    "IVA %",
+    "Cuota IVA",
+    "Total",
+    "Forma de pago",
+    "Cobrado",
+    "Nº factura",
+  ];
+  const cell = (v: string | number | undefined) => {
+    const s = v === undefined ? "" : String(v);
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const body = rows.map(({ invoice: inv, customer, vehicle }) =>
+    [
+      inv.number,
+      day(inv.createdAt),
+      customer?.name,
+      customer?.taxId,
+      customer?.address,
+      customer?.phone,
+      customer?.email,
+      vehicle ? `${vehicle.make} ${vehicle.model}` : "",
+      vehicle?.plate,
+      inv.items.map((it) => `${it.qty} x ${it.description}`).join(" | "),
+      money(inv.subtotal),
+      taxPct,
+      money(inv.tax),
+      money(inv.total),
+      inv.paymentMethod ? PAYMENT_METHOD_LABELS[inv.paymentMethod] : "",
+      money(inv.status === "paid" ? inv.total : inv.paidAmount ?? 0),
+      inv.externalNumber,
+    ]
+      .map(cell)
+      .join(";"),
+  );
+  return [head.join(";"), ...body].join("\r\n");
+}
+
+/** Download the spreadsheet in the browser. */
+export function downloadBillingCsv(tenant: Tenant, rows: BillingRow[], name: string): void {
+  const blob = new Blob(["﻿" + billingCsv(tenant, rows)], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

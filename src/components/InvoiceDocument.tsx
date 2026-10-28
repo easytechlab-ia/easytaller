@@ -1,12 +1,11 @@
-// Talleo — Shared printable invoice document. Renders the fiscal sheet (tenant
-// fiscal data, customer, vehicle, lines, subtotal, IVA, total and payment
-// status) plus the scoped print CSS. Reused by the shop's /app/facturacion/:id
-// route and by the customer view /c/:code so the customer can also print / save
-// a PDF. All read-only & local — no persistence happens here.
+// EasyTaller — printable summary of a finished job: shop data, customer (with
+// NIF / address), car, lines, base, IVA, total and payment. It is NOT an
+// invoice: the invoice is issued by the shop's gestoría / invoicing program
+// (Verifactu). Shown as "Datos para facturar" in the shop and as "Resumen del
+// trabajo" to the customer (/c/:code). Read-only & local.
 
 import type { Customer, Invoice, Location, Tenant, Vehicle } from "@/types";
-import { StatusBadge } from "@/components/base/StatusBadge";
-import { INVOICE_STATUS_LABELS } from "@/lib/invoices";
+import { INVOICE_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/invoices";
 import { warrantyLabel } from "@/lib/quotes";
 import { formatCurrencyCents, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -20,6 +19,8 @@ interface InvoiceDocumentProps {
   /** Unique id used to isolate this sheet when printing. */
   printId?: string;
   className?: string;
+  /** "shop": billing data for the gestoría · "customer": job summary. */
+  variant?: "shop" | "customer";
 }
 
 /**
@@ -49,6 +50,7 @@ export function InvoiceDocument({
   location,
   printId = "invoice-print",
   className,
+  variant = "shop",
 }: InvoiceDocumentProps) {
   const loc = location ?? tenant.locations[0];
 
@@ -105,15 +107,20 @@ export function InvoiceDocument({
             )}
           </div>
           <div className="sm:text-right">
-            <p className="font-mono text-lg font-semibold text-foreground">
-              {invoice.number}
+            <p className="font-display text-xl font-bold text-foreground">
+              {variant === "customer" ? "Resumen del trabajo" : "Datos para facturar"}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 font-mono text-sm text-muted-foreground">
+              Ref. {invoice.number}
+            </p>
+            <p className="text-sm text-muted-foreground">
               {formatDate(invoice.createdAt)}
             </p>
-            <div className="mt-2">
-              <StatusBadge status={invoice.status} />
-            </div>
+            {variant === "shop" && invoice.externalNumber && (
+              <p className="mt-1 text-sm font-medium text-foreground">
+                Factura nº {invoice.externalNumber}
+              </p>
+            )}
           </div>
         </div>
 
@@ -128,6 +135,12 @@ export function InvoiceDocument({
             </p>
             {customer?.phone && (
               <p className="text-sm text-muted-foreground">{customer.phone}</p>
+            )}
+            {customer?.taxId && (
+              <p className="text-sm text-muted-foreground">NIF/CIF {customer.taxId}</p>
+            )}
+            {customer?.address && (
+              <p className="text-sm text-muted-foreground">{customer.address}</p>
             )}
             {customer?.email && (
               <p className="text-sm text-muted-foreground">{customer.email}</p>
@@ -165,7 +178,7 @@ export function InvoiceDocument({
                   <td className="py-2.5 text-foreground">
                     {it.description}
                     <span className="ml-2 text-xs text-muted-foreground">
-                      {it.type === "labor" ? "Mano de obra" : "Pieza"}
+                      {it.type === "labor" ? "Mano de obra" : "Recambio"}
                     </span>
                     {warrantyLabel(it) && (
                       <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -192,7 +205,7 @@ export function InvoiceDocument({
         <div className="flex justify-end">
           <div className="w-full max-w-xs space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
+              <span className="text-muted-foreground">Base imponible</span>
               <span className="text-foreground">
                 {formatCurrencyCents(invoice.subtotal, tenant.currency)}
               </span>
@@ -212,10 +225,19 @@ export function InvoiceDocument({
               </span>
             </div>
             <p className="pt-1 text-right text-xs text-muted-foreground">
-              Estado de cobro: {INVOICE_STATUS_LABELS[invoice.status]}
+              {INVOICE_STATUS_LABELS[invoice.status]}
+              {invoice.paymentMethod
+                ? ` · ${PAYMENT_METHOD_LABELS[invoice.paymentMethod]}`
+                : ""}
             </p>
           </div>
         </div>
+
+        <p className="mt-8 border-t border-border pt-4 text-xs text-muted-foreground">
+          {variant === "customer"
+            ? "Este resumen no es una factura. Si necesitas la factura, pídela al taller."
+            : "Documento interno, no es una factura. La factura se emite desde el programa de facturación del taller o de su gestoría."}
+        </p>
       </div>
     </>
   );
