@@ -1,12 +1,13 @@
-// EasyTaller — "Mi web". The owner decides what the public website shows:
+// EasyTaller — "Mi web". The owner decides how the public website looks and
+// what it shows: main colour (also used by the panel), header colour or photo,
 // blocks on/off, presentation texts, contact details and address, opening
 // hours and, per service, whether it appears and how its price is shown.
 // Contact, address and hours are saved on the tenant (shared with
 // Configuración); the rest in the website settings. Everything is local.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Check, ExternalLink, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/base/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -24,13 +25,18 @@ import {
 import { useAuth } from "@/lib/auth/AuthContext";
 import { servicesRepo, tenantsRepo } from "@/lib/db";
 import { IS_DEMO } from "@/lib/mode";
+import { compressImage } from "@/lib/image";
+import { accentVars, isDark, readableText } from "@/lib/colors";
 import {
+  ACCENT_COLOR_PRESETS,
+  HERO_COLOR_PRESETS,
   PRICE_MODE_LABELS,
   WEBSITE_BLOCKS,
   getWebsiteSettings,
   saveWebsiteSettings,
   serviceWebSettings,
   servicePriceLabel,
+  type HeroBackground,
   type PriceMode,
   type WebsiteBlock,
   type WebsiteServiceSettings,
@@ -65,6 +71,15 @@ function MyWebsitePage() {
   const [show, setShow] = useState<Record<WebsiteBlock, boolean>>(
     () => initial?.show ?? ({} as Record<WebsiteBlock, boolean>),
   );
+  const [accent, setAccent] = useState(tenant?.accentColor ?? "#1877d6");
+  const [heroBackground, setHeroBackground] = useState<HeroBackground>(
+    initial?.heroBackground ?? "color",
+  );
+  const [heroColor, setHeroColor] = useState(initial?.heroColor ?? "#0e2a47");
+  const [heroPhoto, setHeroPhoto] = useState<string | undefined>(initial?.heroPhoto);
+  const [heroOverlay, setHeroOverlay] = useState(initial?.heroOverlay ?? 55);
+  const [uploading, setUploading] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
   const [tagline, setTagline] = useState(initial?.tagline ?? "");
   const [about, setAbout] = useState(initial?.about ?? "");
   const [phone, setPhone] = useState(tenant?.phone ?? location?.phone ?? "");
@@ -90,6 +105,19 @@ function MyWebsitePage() {
   if (!tenant || !initial) return null;
 
   const webUrl = IS_DEMO ? "/" : `/t/${tenant.slug}`;
+
+  const onPhoto = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      setHeroPhoto(await compressImage(file));
+      setHeroBackground("photo");
+    } catch {
+      toast.error("No se ha podido usar esa imagen. Prueba con otra foto (JPG o PNG).");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const setDay = (i: number, patch: Partial<BusinessDay>) =>
     setHours((prev) => prev.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
@@ -120,6 +148,7 @@ function MyWebsitePage() {
 
     // 1) Contact, address and hours live on the shop (shared with Configuración).
     tenantsRepo.update(tenant.id, {
+      accentColor: accent,
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
       businessHours: hours,
@@ -161,6 +190,10 @@ function MyWebsitePage() {
       ...initial,
       tagline: tagline.trim(),
       about: about.trim(),
+      heroBackground: heroBackground === "photo" && heroPhoto ? "photo" : "color",
+      heroColor,
+      heroPhoto,
+      heroOverlay,
       whatsapp: whatsapp.trim(),
       show,
       services: serviceSettings,
@@ -198,7 +231,7 @@ function MyWebsitePage() {
   );
 
   return (
-    <div>
+    <div style={accentVars(accent)}>
       <PageHeader
         title="Mi web"
         description="Decide qué ve tu cliente en la web del taller. Los cambios se publican al guardar."
@@ -206,6 +239,95 @@ function MyWebsitePage() {
       />
 
       <div className="space-y-5">
+        <Section
+          title="Diseño"
+          description="El color principal se usa en los botones de tu web y en este panel."
+        >
+          <Field label="Color principal">
+            <ColorPicker value={accent} presets={ACCENT_COLOR_PRESETS} onChange={setAccent} />
+          </Field>
+
+          <Field label="Fondo de la cabecera">
+            <div className="inline-flex rounded-lg border border-border p-0.5">
+              {(["color", "photo"] as HeroBackground[]).map((bg) => (
+                <button
+                  key={bg}
+                  type="button"
+                  onClick={() => setHeroBackground(bg)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    heroBackground === bg
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {bg === "color" ? "Color" : "Foto"}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {heroBackground === "color" ? (
+            <ColorPicker value={heroColor} presets={HERO_COLOR_PRESETS} onChange={setHeroColor} />
+          ) : (
+            <div className="space-y-3">
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onPhoto(e.target.files?.[0])}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => photoInput.current?.click()} disabled={uploading}>
+                  {uploading ? (
+                    <Loader2 strokeWidth={1.5} className="animate-spin" />
+                  ) : (
+                    <ImagePlus strokeWidth={1.5} />
+                  )}
+                  {heroPhoto ? "Cambiar foto" : "Subir foto"}
+                </Button>
+                {heroPhoto && (
+                  <Button variant="ghost" onClick={() => setHeroPhoto(undefined)}>
+                    <Trash2 strokeWidth={1.5} />
+                    Quitar foto
+                  </Button>
+                )}
+              </div>
+              {heroPhoto && (
+                <label className="block max-w-sm space-y-1.5">
+                  <span className="text-sm text-muted-foreground">
+                    Oscurecer la foto para que el texto se lea bien ({heroOverlay}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={80}
+                    step={5}
+                    value={heroOverlay}
+                    onChange={(e) => setHeroOverlay(Number(e.target.value))}
+                    className="w-full accent-[var(--brand-accent)]"
+                  />
+                </label>
+              )}
+              {!heroPhoto && (
+                <p className="text-sm text-muted-foreground">
+                  Una foto del taller o de la fachada queda genial. Mientras no subas ninguna, se usa el color.
+                </p>
+              )}
+            </div>
+          )}
+
+          <HeroPreview
+            tagline={tagline || tenant.name}
+            accent={accent}
+            background={heroBackground === "photo" && heroPhoto ? "photo" : "color"}
+            color={heroColor}
+            photo={heroPhoto}
+            overlay={heroOverlay}
+          />
+        </Section>
+
         <Section
           title="Qué se muestra"
           description="Enciende o apaga cada parte de tu web."
@@ -408,6 +530,93 @@ function MyWebsitePage() {
         </Section>
 
         <div className="flex justify-end pb-4">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+function ColorPicker({
+  value,
+  presets,
+  onChange,
+}: {
+  value: string;
+  presets: string[];
+  onChange: (hex: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {presets.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          className={cn(
+            "h-9 w-9 rounded-lg border-2 transition-transform hover:scale-105",
+            value.toLowerCase() === c.toLowerCase() ? "border-foreground" : "border-border",
+          )}
+          style={{ backgroundColor: c }}
+          aria-label={`Color ${c}`}
+        />
+      ))}
+      <label className="relative flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-muted-foreground hover:text-foreground">
+        <span className="h-5 w-5 rounded" style={{ backgroundColor: value }} />
+        Otro color
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 cursor-pointer opacity-0"
+        />
+      </label>
+    </div>
+  );
+}
+
+/** Small live preview of the website header with the chosen design. */
+function HeroPreview({
+  tagline,
+  accent,
+  background,
+  color,
+  photo,
+  overlay,
+}: {
+  tagline: string;
+  accent: string;
+  background: HeroBackground;
+  color: string;
+  photo?: string;
+  overlay: number;
+}) {
+  const darkBg = background === "photo" ? true : isDark(color);
+  return (
+    <div>
+      <p className="mb-1.5 text-sm text-muted-foreground">Vista previa</p>
+      <div
+        className="relative overflow-hidden rounded-xl border border-border px-5 py-6"
+        style={
+          background === "photo" && photo
+            ? {
+                backgroundImage: `linear-gradient(rgba(0,0,0,${overlay / 100}), rgba(0,0,0,${overlay / 100})), url(${photo})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }
+            : { backgroundColor: color }
+        }
+      >
+        <p
+          className="max-w-xs font-display text-2xl font-bold leading-tight"
+          style={{ color: darkBg ? "#ffffff" : "#0f172a" }}
+        >
+          {tagline}
+        </p>
+        <span
+          className="mt-4 inline-flex rounded-md px-3 py-1.5 text-sm font-medium"
+          style={{ backgroundColor: accent, color: readableText(accent) }}
+        >
+          Pedir cita
+        </span>
       </div>
     </div>
   );
