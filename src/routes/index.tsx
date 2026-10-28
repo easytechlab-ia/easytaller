@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { DEMO_TENANT_SLUG, IS_DEMO } from "@/lib/mode";
+import { PublicBookingPage } from "@/components/public/PublicShopPage";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -11,7 +13,6 @@ import {
   BellRing,
   Building2,
   Check,
-  Star,
   Clock,
   ShieldCheck,
   PhoneOff,
@@ -33,34 +34,50 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
+  // Demo mode: "/" is the public website of the demo shop.
+  // SaaS mode: "/" is the EasyTaller product landing page.
+  head: () =>
+    IS_DEMO
+      ? {
+          meta: [
+            { title: "Taller EasyTech — Mecánica en Barcelona · Pide cita online" },
+            {
+              name: "description",
+              content:
+                "Taller mecánico en Barcelona: mantenimiento, frenos, diagnóstico y ITV. Pide cita online en un minuto. (Demo de EasyTaller por EasyTech.)",
+            },
+          ],
+        }
+      : {
     meta: [
-      { title: "Talleo — Gestiona tu taller y mantén al cliente informado" },
+      { title: "EasyTaller — Gestiona tu taller y mantén al cliente informado" },
       {
         name: "description",
         content:
-          "Talleo reúne órdenes, inspección digital, presupuestos con aprobación, reserva online y facturación. Tus clientes siguen su coche en tiempo real con un código.",
+          "EasyTaller reúne órdenes, inspección digital, presupuestos con aprobación, reserva online y facturación. Tus clientes siguen su coche en tiempo real con un código.",
       },
-      { property: "og:title", content: "Talleo — Software para talleres mecánicos" },
+      { property: "og:title", content: "EasyTaller — Software para talleres mecánicos" },
       {
         property: "og:description",
         content:
           "Órdenes, DVI, presupuestos con firma, reserva online y facturación. El cliente sigue su coche con un código, sin registro.",
       },
     ],
-  }),
-  component: Landing,
+  },
+  component: IS_DEMO ? DemoHome : Landing,
 });
 
-/* -------------------------------------------------------------------------- */
+function DemoHome() {
+  return <PublicBookingPage slug={DEMO_TENANT_SLUG} />;
+}
 
-const TRUST = ["Garaje Norte", "AutoExprés", "Talleres Vega", "MecaPro", "RuedaViva", "BoxCar"];
+/* -------------------------------------------------------------------------- */
 
 const PAINS = [
   {
     icon: PhoneOff,
     title: "El teléfono no para",
-    body: "«¿Está listo mi coche?» Talleo informa al cliente en tiempo real y bajan las llamadas.",
+    body: "«¿Está listo mi coche?» EasyTaller informa al cliente en tiempo real y bajan las llamadas.",
   },
   {
     icon: ClipboardList,
@@ -156,30 +173,10 @@ const PLANS = [
   },
 ];
 
-const TESTIMONIALS = [
-  {
-    quote:
-      "Desde que usamos Talleo, las llamadas de «¿está listo?» han bajado a la mitad. El cliente lo ve todo.",
-    name: "Marta Ruiz",
-    role: "Garaje Norte",
-  },
-  {
-    quote:
-      "La inspección con semáforo y fotos nos ha hecho ganar confianza. Aprueban presupuestos sin discutir.",
-    name: "Diego Fernández",
-    role: "AutoExprés",
-  },
-  {
-    quote: "Montar la reserva online fue inmediato. Ahora las citas entran solas en la agenda.",
-    name: "Lucía Ortega",
-    role: "Talleres Vega",
-  },
-];
-
 const FAQ = [
   {
     q: "¿Necesito instalar algo?",
-    a: "No. Talleo funciona en el navegador, desde el ordenador del taller o el móvil. Esta es una demo local y simulada que se guarda en tu navegador.",
+    a: "No. EasyTaller funciona en el navegador, desde el ordenador del taller o el móvil. Esta es una demo local y simulada que se guarda en tu navegador.",
   },
   {
     q: "¿Cómo ve el cliente su coche?",
@@ -227,7 +224,7 @@ function Landing() {
               El cliente, informado.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground sm:text-lg">
-              Talleo reúne órdenes, inspección digital, presupuestos con aprobación, reserva online
+              EasyTaller reúne órdenes, inspección digital, presupuestos con aprobación, reserva online
               y facturación. Tus clientes siguen su coche en tiempo real con un código.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -258,25 +255,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Trust bar */}
-      <section className="border-y border-border bg-background-subtle">
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <p className="text-center text-xs uppercase tracking-wide text-muted-foreground">
-            Talleres que confían en Talleo
-          </p>
-          <div className="mt-5 grid grid-cols-2 items-center gap-6 opacity-60 sm:grid-cols-3 lg:grid-cols-6">
-            {TRUST.map((name) => (
-              <div
-                key={name}
-                className="text-center text-sm font-semibold tracking-tight text-muted-foreground"
-              >
-                {name}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Problem -> solution */}
       <section id="producto" className="scroll-mt-20">
         <div className="mx-auto max-w-6xl px-6 py-20">
@@ -286,7 +264,7 @@ function Landing() {
               El día a día del taller, sin caos
             </h2>
             <p className="mt-4 text-muted-foreground">
-              Talleo sustituye papeles, llamadas y mensajes sueltos por un flujo claro que tu equipo
+              EasyTaller sustituye papeles, llamadas y mensajes sueltos por un flujo claro que tu equipo
               y tus clientes entienden a la primera.
             </p>
           </Reveal>
@@ -458,34 +436,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="mx-auto max-w-6xl px-6 py-20">
-        <Reveal className="max-w-2xl">
-          <SectionLabel>Testimonios</SectionLabel>
-          <h2 className="mt-5 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Talleres que ya trabajan mejor
-          </h2>
-        </Reveal>
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {TESTIMONIALS.map((t, i) => (
-            <Reveal key={t.name} delay={i * 100}>
-              <figure className="flex h-full flex-col rounded-2xl border border-border bg-card p-6">
-                <div className="flex gap-0.5 text-foreground">
-                  {Array.from({ length: 5 }).map((_, s) => (
-                    <Star key={s} className="h-4 w-4 fill-current" strokeWidth={0} />
-                  ))}
-                </div>
-                <blockquote className="mt-4 flex-1 text-sm text-foreground">“{t.quote}”</blockquote>
-                <figcaption className="mt-5 text-sm">
-                  <span className="font-semibold text-foreground">{t.name}</span>
-                  <span className="block text-muted-foreground">{t.role}</span>
-                </figcaption>
-              </figure>
-            </Reveal>
-          ))}
-        </div>
-      </section>
-
       {/* FAQ */}
       <section id="faq" className="scroll-mt-20 border-t border-border bg-background-subtle">
         <div className="mx-auto max-w-3xl px-6 py-20">
@@ -517,7 +467,7 @@ function Landing() {
               Ordena tu taller esta semana
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-background/70">
-              Pide una demo y descubre cómo Talleo reduce llamadas, acelera entregas y mejora la
+              Pide una demo y descubre cómo EasyTaller reduce llamadas, acelera entregas y mejora la
               experiencia de tus clientes.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
