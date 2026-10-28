@@ -68,6 +68,10 @@ export interface Customer {
   phone: string;
   email?: string;
   notes?: string;
+  // Billing data (optional): needed when the customer wants an invoice in the
+  // name of a company or self-employed person.
+  taxId?: string; // NIF / CIF
+  address?: string; // fiscal address
   createdAt: string;
 }
 
@@ -297,9 +301,17 @@ export interface Invoice {
   subtotal: number;
   tax: number;
   total: number;
-  status: "pending" | "paid" | "partial";
+  status: "pending" | "paid" | "partial"; // payment
+  paymentMethod?: PaymentMethod;
+  paidAmount?: number; // amount collected so far
+  // EasyTaller doesn't issue invoices (Verifactu): it prepares the billing data
+  // and the shop's gestoría / invoicing program makes the invoice.
+  sentAt?: string; // when the data was sent to the gestoría
+  externalNumber?: string; // invoice number in the shop's own program
   createdAt: string;
 }
+
+export type PaymentMethod = "efectivo" | "tarjeta" | "bizum" | "transferencia";
 
 export type AppointmentStatus =
   | "programada"
