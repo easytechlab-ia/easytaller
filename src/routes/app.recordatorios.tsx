@@ -127,8 +127,8 @@ function RemindersPage() {
   return (
     <div>
       <PageHeader
-        title="Recordatorios"
-        description="Próximas revisiones por fecha y kilómetros."
+        title="Avisos"
+        description="ITV, revisiones y mantenimientos próximos o vencidos. Avisa al cliente por WhatsApp en un toque."
       />
 
       {rows.length === 0 ? (
