@@ -5,14 +5,22 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Talleo design system — monochromatic, minimal, mobile-first.
- * Single brand accent via --talleo-accent (override per tenant on a wrapper).
+ * EasyTaller design system (EasyTech brand) — clean, mobile-first.
+ * Interactive brand color via --brand-accent (override per tenant on a wrapper).
+ * EasyTech palette tokens (--brand-*) for decorative surfaces and gradients.
  * Functional colors reserved strictly for states.
  */
 
 @theme inline {
   --font-sans:
     "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display:
+    "League Spartan", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand: var(--brand-blue);
+  --color-brand-sky: var(--brand-sky);
+  --color-brand-cyan: var(--brand-cyan);
+  --color-brand-soft: var(--brand-soft);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -54,8 +62,15 @@
 }
 
 :root {
-  /* Brand accent — change this single line to rebrand */
-  --talleo-accent: #2f6fed;
+  /* EasyTech palette (from the logo) */
+  --brand-blue: #3797f5; /* "Easy" */
+  --brand-sky: #7dc2fc; /* "Tech" */
+  --brand-cyan: #29b6f6; /* icon gradient start */
+  --brand-soft: #eaf4fe; /* tinted surfaces */
+  --brand-gradient: linear-gradient(135deg, var(--brand-cyan) 0%, var(--brand-blue) 100%);
+
+  /* Interactive accent: logo blue, one step darker so white text stays legible */
+  --brand-accent: #1877d6;
 
   --radius: 0.75rem;
 
@@ -69,14 +84,14 @@
   --popover-foreground: #18181b;
 
   /* Primary = brand accent */
-  --primary: var(--talleo-accent);
+  --primary: var(--brand-accent);
   --primary-foreground: #ffffff;
 
   --secondary: #f4f4f5; /* zinc-100 */
   --secondary-foreground: #18181b;
   --muted: #fafafa;
   --muted-foreground: #71717a; /* zinc-500 */
-  --accent: #f4f4f5;
+  --accent: #f1f6fd; /* subtle brand tint for hovers */
   --accent-foreground: #18181b;
 
   /* Functional state colors */
@@ -88,19 +103,21 @@
   --border: #e4e4e7; /* zinc-200 */
   --border-strong: #d4d4d8; /* zinc-300 */
   --input: #e4e4e7;
-  --ring: var(--talleo-accent);
+  --ring: var(--brand-accent);
 
   --sidebar: #fafafa;
   --sidebar-foreground: #18181b;
-  --sidebar-primary: var(--talleo-accent);
+  --sidebar-primary: var(--brand-accent);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f4f4f5;
+  --sidebar-accent: var(--brand-soft);
   --sidebar-accent-foreground: #18181b;
   --sidebar-border: #e4e4e7;
-  --sidebar-ring: var(--talleo-accent);
+  --sidebar-ring: var(--brand-accent);
 }
 
 .dark {
+  --brand-soft: #0f2338;
+  --brand-accent: #3797f5;
   --background: #0a0a0a;
   --background-subtle: #111111;
   --foreground: #fafafa;
@@ -110,7 +127,7 @@
   --popover: #111111;
   --popover-foreground: #fafafa;
 
-  --primary: var(--talleo-accent);
+  --primary: var(--brand-accent);
   --primary-foreground: #ffffff;
 
   --secondary: #1a1a1a;
@@ -128,16 +145,16 @@
   --border: #262626;
   --border-strong: #3f3f46;
   --input: #262626;
-  --ring: var(--talleo-accent);
+  --ring: var(--brand-accent);
 
   --sidebar: #0a0a0a;
   --sidebar-foreground: #fafafa;
-  --sidebar-primary: var(--talleo-accent);
+  --sidebar-primary: var(--brand-accent);
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #1a1a1a;
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: #262626;
-  --sidebar-ring: var(--talleo-accent);
+  --sidebar-ring: var(--brand-accent);
 }
 
 @layer base {
@@ -149,9 +166,31 @@
     font-family: var(--font-sans);
   }
 
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  .bg-brand-gradient {
+    background-image: var(--brand-gradient);
+  }
+  .text-brand-gradient {
+    background-image: var(--brand-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .font-display {
+    font-family: var(--font-display);
   }
 }

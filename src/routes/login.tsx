@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, redirect } from "@tanstack/react-router";
+import { IS_DEMO } from "@/lib/mode";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +9,14 @@ import { usersRepo } from "@/lib/db";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
+  // No login in demo mode: the demo goes straight to the shop panel.
+  beforeLoad: () => {
+    if (IS_DEMO) throw redirect({ to: "/app" });
+  },
   head: () => ({
     meta: [
-      { title: "Acceder · Talleo" },
-      { name: "description", content: "Accede a tu cuenta de Talleo." },
+      { title: "Acceder · EasyTaller" },
+      { name: "description", content: "Accede a tu cuenta de EasyTaller." },
     ],
   }),
   component: LoginPage,
@@ -60,7 +65,7 @@ function LoginPage() {
               Inicia sesión
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Accede con tu cuenta de Talleo.
+              Accede con tu cuenta de EasyTaller.
             </p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-3">

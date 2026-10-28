@@ -1,17 +1,16 @@
 import { useEffect } from "react";
-import {
-  createFileRoute,
-  Link,
-  Outlet,
-  useNavigate,
-  useRouterState,
-} from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState, redirect } from "@tanstack/react-router";
+import { IS_DEMO } from "@/lib/mode";
 import { LayoutDashboard, Building2, CreditCard, LogOut } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin")({
+  // Superadmin is SaaS-only: the demo goes straight to the shop panel.
+  beforeLoad: () => {
+    if (IS_DEMO) throw redirect({ to: "/app" });
+  },
   component: AdminLayout,
 });
 
