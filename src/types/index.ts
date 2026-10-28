@@ -281,6 +281,8 @@ export interface WorkOrder {
   handledBy?: "agent" | "human";
   // Customer's signed decision on the quote (approval view).
   quoteApproval?: { signature: string; decidedAt: string };
+  // When the quote was last sent to the customer (for "waiting X days").
+  quoteSentAt?: string;
   estimatedReadyAt?: string;
   createdAt: string;
   updatedAt: string;
