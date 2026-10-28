@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { IS_DEMO } from "@/lib/mode";
 import { useState } from "react";
 import { CheckCircle2, ArrowLeft } from "lucide-react";
 import { MarketingLayout } from "@/components/marketing/MarketingLayout";
@@ -9,18 +10,22 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/contacto")({
+  // SaaS-only page: the demo goes straight to the shop website.
+  beforeLoad: () => {
+    if (IS_DEMO) throw redirect({ to: "/" });
+  },
   head: () => ({
     meta: [
-      { title: "Solicitar demo · Talleo" },
+      { title: "Solicitar demo · EasyTaller" },
       {
         name: "description",
         content:
-          "Pide una demo de Talleo. Cuéntanos sobre tu taller y te mostramos cómo ordenar el trabajo y mantener al cliente informado.",
+          "Pide una demo de EasyTaller. Cuéntanos sobre tu taller y te mostramos cómo ordenar el trabajo y mantener al cliente informado.",
       },
-      { property: "og:title", content: "Solicitar demo · Talleo" },
+      { property: "og:title", content: "Solicitar demo · EasyTaller" },
       {
         property: "og:description",
-        content: "Pide una demo de Talleo y descubre cómo ordenar tu taller.",
+        content: "Pide una demo de EasyTaller y descubre cómo ordenar tu taller.",
       },
     ],
   }),
@@ -74,7 +79,7 @@ function ContactPage() {
                 Solicita una demo
               </h1>
               <p className="mt-4 text-muted-foreground">
-                Cuéntanos sobre tu taller y te enseñamos Talleo en acción. Sin compromiso.
+                Cuéntanos sobre tu taller y te enseñamos EasyTaller en acción. Sin compromiso.
               </p>
             </Reveal>
 
