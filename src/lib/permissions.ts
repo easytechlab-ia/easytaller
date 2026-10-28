@@ -1,4 +1,4 @@
-// Talleo — role-based permissions for the Taller (shop) views.
+// EasyTaller — role-based permissions for the Taller (shop) views.
 // Golden rule: the owner always has full access and is never restricted, so a
 // teacher can never get locked out during a class demo.
 
@@ -70,6 +70,10 @@ export function canEdit(role: Role, module: AppModule): boolean {
 // ----------------------------------------------------------------------------
 
 export type ToggleableModule =
+  | "presupuestos"
+  | "facturacion"
+  | "servicios"
+  | "equipo"
   | "stock"
   | "mensajes"
   | "agentes"
@@ -79,6 +83,10 @@ export type ToggleableModule =
 
 /** Optional modules the owner can enable/disable per shop. */
 export const TOGGLEABLE_MODULES: ToggleableModule[] = [
+  "presupuestos",
+  "facturacion",
+  "servicios",
+  "equipo",
   "stock",
   "mensajes",
   "agentes",
@@ -94,11 +102,7 @@ export const CORE_MODULES = [
   "clientes",
   "vehiculos",
   "citas",
-  "presupuestos",
-  "facturacion",
-  "servicios",
   "configuracion",
-  "equipo",
 ] as const;
 
 const TOGGLEABLE_SET = new Set<string>(TOGGLEABLE_MODULES);

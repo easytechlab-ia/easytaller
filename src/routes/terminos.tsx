@@ -1,18 +1,23 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { IS_DEMO } from "@/lib/mode";
 import { LegalPage } from "@/components/marketing/LegalPage";
 
 export const Route = createFileRoute("/terminos")({
+  // SaaS-only page: the demo goes straight to the shop website.
+  beforeLoad: () => {
+    if (IS_DEMO) throw redirect({ to: "/" });
+  },
   head: () => ({
     meta: [
-      { title: "Términos y condiciones · Talleo" },
+      { title: "Términos y condiciones · EasyTaller" },
       {
         name: "description",
-        content: "Condiciones generales de uso del servicio Talleo. Plantilla de ejemplo.",
+        content: "Condiciones generales de uso del servicio EasyTaller. Plantilla de ejemplo.",
       },
-      { property: "og:title", content: "Términos y condiciones · Talleo" },
+      { property: "og:title", content: "Términos y condiciones · EasyTaller" },
       {
         property: "og:description",
-        content: "Condiciones generales de uso del servicio Talleo. Plantilla de ejemplo.",
+        content: "Condiciones generales de uso del servicio EasyTaller. Plantilla de ejemplo.",
       },
     ],
   }),
@@ -24,13 +29,13 @@ function TermsPage() {
     <LegalPage
       title="Términos y condiciones"
       updated="31 de mayo de 2026"
-      intro="Estas condiciones regulan, de forma general, el acceso y uso del servicio Talleo."
+      intro="Estas condiciones regulan, de forma general, el acceso y uso del servicio EasyTaller."
       sections={[
         {
           heading: "Objeto",
           body: (
             <p>
-              Talleo es un software de gestión para talleres mecánicos que permite administrar
+              EasyTaller es un software de gestión para talleres mecánicos que permite administrar
               órdenes, inspecciones, presupuestos, citas y la comunicación con los clientes.
             </p>
           ),

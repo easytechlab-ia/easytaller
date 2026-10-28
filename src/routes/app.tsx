@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   createFileRoute,
   Link,
@@ -11,7 +11,6 @@ import {
   Calendar,
   Users,
   Car,
-  ClipboardList,
   FileText,
   Receipt,
   Wrench,
@@ -25,6 +24,8 @@ import {
   LogOut,
   MoreHorizontal,
   Home,
+  Tag,
+  Globe,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { NotificationBell } from "@/components/app/NotificationBell";
@@ -35,6 +36,13 @@ import { evaluateDocumentExpiries } from "@/lib/documents";
 import { evaluateLowStock } from "@/lib/stock";
 import { unreadMessagesCount } from "@/lib/inbox";
 import { cn } from "@/lib/utils";
+import { IS_DEMO } from "@/lib/mode";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 export const Route = createFileRoute("/app")({
   component: AppLayout,
@@ -42,41 +50,46 @@ export const Route = createFileRoute("/app")({
 
 const NAV = [
   { to: "/app", label: "Inicio", icon: LayoutDashboard, exact: true, module: "dashboard" },
+  { to: "/app/ordenes", label: "En taller", icon: Wrench, exact: false, module: "ordenes" },
   { to: "/app/citas", label: "Citas", icon: Calendar, exact: false, module: "citas" },
   { to: "/app/clientes", label: "Clientes", icon: Users, exact: false, module: "clientes" },
   { to: "/app/vehiculos", label: "Vehículos", icon: Car, exact: false, module: "vehiculos" },
-  { to: "/app/ordenes", label: "Órdenes", icon: ClipboardList, exact: false, module: "ordenes" },
+  { to: "/app/recordatorios", label: "Avisos", icon: BellRing, exact: false, module: "recordatorios" },
   { to: "/app/presupuestos", label: "Presupuestos", icon: FileText, exact: false, module: "presupuestos" },
   { to: "/app/facturacion", label: "Facturación", icon: Receipt, exact: false, module: "facturacion" },
-  { to: "/app/servicios", label: "Servicios", icon: Wrench, exact: false, module: "servicios" },
+  { to: "/app/servicios", label: "Servicios", icon: Tag, exact: false, module: "servicios" },
   { to: "/app/stock", label: "Stock", icon: Boxes, exact: false, module: "stock" },
   { to: "/app/mensajes", label: "Mensajes", icon: MessageSquare, exact: false, module: "mensajes" },
   { to: "/app/agentes", label: "Agentes", icon: Bot, exact: false, module: "agentes" },
-  { to: "/app/recordatorios", label: "Recordatorios", icon: BellRing, exact: false, module: "recordatorios" },
   { to: "/app/resenas", label: "Reseñas", icon: Star, exact: false, module: "resenas" },
   { to: "/app/equipo", label: "Equipo", icon: UsersRound, exact: false, module: "equipo" },
   { to: "/app/configuracion", label: "Configuración", icon: Settings, exact: false, module: "configuracion" },
 ] as const;
 
-// Mobile bottom bar: key shortcuts only.
+// Mobile bottom bar: the four key shortcuts + "Más" (opens the rest).
 const BOTTOM = [
   { to: "/app", label: "Inicio", icon: Home, exact: true, module: "dashboard" },
-  { to: "/app/ordenes", label: "Órdenes", icon: ClipboardList, exact: false, module: "ordenes" },
+  { to: "/app/ordenes", label: "En taller", icon: Wrench, exact: false, module: "ordenes" },
   { to: "/app/citas", label: "Citas", icon: Calendar, exact: false, module: "citas" },
   { to: "/app/clientes", label: "Clientes", icon: Users, exact: false, module: "clientes" },
-  { to: "/app/configuracion", label: "Más", icon: MoreHorizontal, exact: false, module: "configuracion" },
 ] as const;
+const BOTTOM_PATHS = new Set<string>(BOTTOM.map((b) => b.to));
 
 function AppLayout() {
   const { ready, user, tenant, logout } = useAuth();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Close the mobile "Más" menu after navigating.
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   // Session guard: redirect to /login when there is no active session/tenant
   // (covers a full page reload landing directly on /app/*).
   useEffect(() => {
     if (ready && (!user || !tenant)) {
-      navigate({ to: "/login" });
+      // Demo mode signs in automatically (AuthContext); just go home.
+      navigate({ to: IS_DEMO ? "/" : "/login" });
     }
   }, [ready, user, tenant, navigate]);
 
@@ -120,12 +133,14 @@ function AppLayout() {
   const bottomItems = BOTTOM.filter(
     (item) => can(user.role, item.module) && isModuleEnabled(tenant, item.module),
   );
+  const moreItems = navItems.filter((item) => !BOTTOM_PATHS.has(item.to));
+  const moreActive = moreItems.some((item) => pathname.startsWith(item.to));
 
   // Unread customer messages badge (recomputed on every navigation).
   const unreadMessages = unreadMessagesCount(tenant.id);
 
   const accentStyle = tenant
-    ? ({ ["--talleo-accent" as string]: tenant.accentColor } as React.CSSProperties)
+    ? ({ ["--brand-accent" as string]: tenant.accentColor } as React.CSSProperties)
     : undefined;
 
   return (
@@ -171,14 +186,24 @@ function AppLayout() {
           })}
         </nav>
         <div className="border-t border-border p-3">
-          <Link
-            to="/login"
-            onClick={logout}
-            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-          >
-            <LogOut strokeWidth={1.5} className="h-4 w-4" />
-            Salir
-          </Link>
+          {IS_DEMO ? (
+            <Link
+              to="/"
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Globe strokeWidth={1.5} className="h-4 w-4" />
+              Ver web del taller
+            </Link>
+          ) : (
+            <Link
+              to="/login"
+              onClick={logout}
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <LogOut strokeWidth={1.5} className="h-4 w-4" />
+              Salir
+            </Link>
+          )}
         </div>
       </aside>
 
@@ -202,7 +227,7 @@ function AppLayout() {
         </main>
 
         {/* Mobile bottom nav */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-card md:hidden">
+        <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
           {bottomItems.map((item) => {
             const active = item.exact
               ? pathname === item.to
@@ -221,7 +246,65 @@ function AppLayout() {
               </Link>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setMoreOpen(true)}
+            className={cn(
+              "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+              moreActive ? "text-primary" : "text-muted-foreground",
+            )}
+          >
+            <MoreHorizontal strokeWidth={1.5} className="h-5 w-5" />
+            Más
+          </button>
         </nav>
+
+        {/* Mobile "Más": the rest of the modules */}
+        <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+          <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-8 pt-5">
+            <SheetHeader className="p-0 pb-3 text-left">
+              <SheetTitle>Más opciones</SheetTitle>
+            </SheetHeader>
+            <div className="grid grid-cols-3 gap-2">
+              {moreItems.map((item) => {
+                const active = pathname.startsWith(item.to);
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={cn(
+                      "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-medium transition-colors",
+                      active
+                        ? "border-primary bg-brand-soft text-primary"
+                        : "border-border text-foreground hover:bg-accent",
+                    )}
+                  >
+                    <item.icon strokeWidth={1.5} className="h-5 w-5" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+              {IS_DEMO ? (
+                <Link
+                  to="/"
+                  className="flex flex-col items-center gap-1.5 rounded-xl border border-border px-2 py-3 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  <Globe strokeWidth={1.5} className="h-5 w-5" />
+                  Web del taller
+                </Link>
+              ) : (
+                <Link
+                  to="/login"
+                  onClick={logout}
+                  className="flex flex-col items-center gap-1.5 rounded-xl border border-border px-2 py-3 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  <LogOut strokeWidth={1.5} className="h-5 w-5" />
+                  Salir
+                </Link>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );

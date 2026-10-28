@@ -12,6 +12,17 @@ Todo funciona en el navegador: no hay backend y los datos de ejemplo se guardan 
 - Tailwind CSS 4 + shadcn/ui
 - Publicación en Vercel como web estática (`vercel.json` redirige todas las rutas a `index.html`)
 
+## Modos: demo y SaaS
+
+La app tiene dos modos, controlados por la variable de entorno `VITE_APP_MODE` (ver `.env.example`):
+
+- **`demo`** (por defecto): un solo taller, *Taller EasyTech* (Barcelona), sin login ni superadmin. La raíz `/` es la web pública del taller y `/app` es el panel. Es la versión que se enseña a los talleres.
+- **`saas`**: varios talleres, login, superadmin (`/admin`), planes y la web comercial de EasyTaller en `/`.
+
+En el modo demo solo están activos los módulos del recorrido de la demo; el resto (presupuestos, facturación, servicios, equipo, stock, mensajes, agentes, reseñas) se activa desde **Configuración → Módulos**.
+
+El panel interno de la demo (cambiar de vista, reiniciar datos) se abre con `Ctrl/Cmd + Shift + K`, manteniendo pulsado el logo o en `/panel`.
+
 ## Desarrollo
 
 Requiere Node.js 20.19 o superior.

@@ -1,18 +1,23 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { IS_DEMO } from "@/lib/mode";
 import { LegalPage } from "@/components/marketing/LegalPage";
 
 export const Route = createFileRoute("/privacidad")({
+  // SaaS-only page: the demo goes straight to the shop website.
+  beforeLoad: () => {
+    if (IS_DEMO) throw redirect({ to: "/" });
+  },
   head: () => ({
     meta: [
-      { title: "Política de privacidad · Talleo" },
+      { title: "Política de privacidad · EasyTaller" },
       {
         name: "description",
-        content: "Cómo Talleo trata y protege los datos personales. Plantilla de ejemplo.",
+        content: "Cómo EasyTaller trata y protege los datos personales. Plantilla de ejemplo.",
       },
-      { property: "og:title", content: "Política de privacidad · Talleo" },
+      { property: "og:title", content: "Política de privacidad · EasyTaller" },
       {
         property: "og:description",
-        content: "Cómo Talleo trata y protege los datos personales. Plantilla de ejemplo.",
+        content: "Cómo EasyTaller trata y protege los datos personales. Plantilla de ejemplo.",
       },
     ],
   }),
@@ -24,13 +29,13 @@ function PrivacyPage() {
     <LegalPage
       title="Política de privacidad"
       updated="31 de mayo de 2026"
-      intro="Tu privacidad nos importa. Este documento explica, de forma general, qué datos se tratan al usar Talleo y con qué finalidad."
+      intro="Tu privacidad nos importa. Este documento explica, de forma general, qué datos se tratan al usar EasyTaller y con qué finalidad."
       sections={[
         {
           heading: "Responsable del tratamiento",
           body: (
             <p>
-              Talleo actúa como responsable del tratamiento de los datos facilitados a través de su
+              EasyTaller actúa como responsable del tratamiento de los datos facilitados a través de su
               sitio y de la aplicación. Puedes contactarnos en cualquier momento desde la página de
               contacto.
             </p>

@@ -1,4 +1,4 @@
-// Talleo — demo seed data. Everything is local and simulated.
+// EasyTaller — demo seed data. Everything is local and simulated.
 
 import type {
   Appointment,
@@ -37,10 +37,12 @@ import {
 } from "./repos";
 import { clearAll, readRaw, uid, writeRaw } from "./storage";
 import { quoteTotals } from "@/lib/orders";
+import { DEMO_TENANT_ID, DEMO_TENANT_SLUG, IS_DEMO } from "@/lib/mode";
 
 const SEED_FLAG = "seeded";
-// Bump when the seed shape changes to force a clean reseed of the demo.
-const SEED_VERSION = "13";
+// Bump when the seed shape changes to force a clean reseed of the demo. The mode
+// is part of the version so switching demo ⇄ saas reseeds too.
+const SEED_VERSION = `14-${IS_DEMO ? "demo" : "saas"}`;
 
 // Tiny base64 placeholder images (kept small to respect the ~5MB quota).
 const PHOTO_A =
@@ -86,6 +88,15 @@ function code6(): string {
 function daysFromNow(days: number, hour = 10, minute = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+}
+
+// Like daysFromNow, but a date that falls on Sunday (shop closed) moves to Monday.
+function businessDayFromNow(days: number, hour = 10, minute = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  if (d.getDay() === 0) d.setDate(d.getDate() + 1);
   d.setHours(hour, minute, 0, 0);
   return d.toISOString();
 }
@@ -214,6 +225,11 @@ interface TenantSeed {
   orders: OrderSeed[];
   reminders: ReminderSeed[];
   priceFactor: number; // 1 for EUR, ~20 for MXN
+  // Optional agenda: [daysFromToday, hour, minute, status, source, serviceIdx].
+  // Sundays are moved to Monday. Defaults to a small generic agenda.
+  appointments?: Array<
+    [number, number, number, Appointment["status"], "online" | "manual", number]
+  >;
 }
 
 // Shared inspection presets reused across orders.
@@ -388,7 +404,7 @@ function seedTenant(ts: TenantSeed): void {
   } as Omit<User, "id">);
 
   // Services & parts (scaled by currency factor).
-  SERVICE_NAMES.forEach(([name, basePrice, estimatedMinutes]) =>
+  const services: Service[] = SERVICE_NAMES.map(([name, basePrice, estimatedMinutes]) =>
     servicesRepo.create(t, {
       tenantId: t,
       name,
@@ -630,22 +646,24 @@ function seedTenant(ts: TenantSeed): void {
   }
 
   // Appointments — today and upcoming, including online bookings.
-  const appts: Array<[number, number, Appointment["status"], "online" | "manual"]> = [
-    [0, 9, "confirmada", "online"],
-    [0, 12, "programada", "manual"],
-    [0, 16, "en_taller", "online"],
-    [1, 10, "programada", "online"],
-    [2, 11, "confirmada", "manual"],
-  ];
-  appts.forEach(([d, h, status, source], i) => {
+  const appts =
+    ts.appointments ??
+    ([
+      [0, 9, 0, "confirmada", "online", 0],
+      [0, 12, 0, "programada", "manual", 3],
+      [0, 16, 0, "en_taller", "online", 1],
+      [1, 10, 0, "programada", "online", 4],
+      [2, 11, 0, "confirmada", "manual", 5],
+    ] as NonNullable<TenantSeed["appointments"]>);
+  appts.forEach(([d, h, m, status, source, si], i) => {
     const v = vehicles[i % vehicles.length];
     appointmentsRepo.create(t, {
       tenantId: t,
       locationId,
       customerId: v.customerId,
       vehicleId: v.id,
-      serviceIds: [],
-      scheduledAt: daysFromNow(d, h),
+      serviceIds: services[si] ? [services[si].id] : [],
+      scheduledAt: businessDayFromNow(d, h, m),
       status,
       source,
     } as Omit<Appointment, "id">);
@@ -774,52 +792,69 @@ function nextNumber(tenantId: string): string {
 
 const BRAKE_WARRANTY = { warrantyMonths: 12, warrantyKm: 20000 };
 
-// Taller García — Madrid (EUR, IVA 21%), Pro.
-const GARCIA: TenantSeed = {
+// Taller EasyTech — Barcelona (EUR, IVA 21%), Pro. The single shop of the demo.
+// Fictional business: name, address, phone and people are invented.
+const EASYTECH: TenantSeed = {
   priceFactor: 1,
-  accent: "#2F6FED",
-  ownerName: "Carlos García",
+  accent: "#1877D6",
+  ownerName: "Xavi Domènech",
   tenant: {
-    id: "tnt_garcia",
-    name: "Taller García",
-    slug: "garcia",
-    accentColor: "#2F6FED",
+    id: DEMO_TENANT_ID,
+    name: "Taller EasyTech",
+    slug: DEMO_TENANT_SLUG,
+    accentColor: "#1877D6",
     planId: "plan_pro",
     status: "active",
     currency: "EUR",
     taxRate: 0.21,
-    legalName: "Talleres García e Hijos S.L.",
-    taxId: "B-87654321",
-    email: "info@tallergarcia.es",
-    phone: "910 234 567",
-    googleReviewUrl: "https://g.page/r/taller-garcia-madrid/review",
-    businessHours: weekHours("08:30", "19:00", "09:00", "14:00"),
-    enabledModules: { stock: true, mensajes: true, recordatorios: true, resenas: true, reserva_online: true },
+    legalName: "Taller EasyTech (demo)",
+    taxId: "B-00000000",
+    email: "hola@tallereasytech.demo",
+    phone: "930 00 00 00",
+    businessHours: weekHours("08:00", "19:00", "09:00", "13:30"),
+    // Demo mode: only the modules of the 5-minute pitch are on. The rest stay
+    // available and can be switched on from Configuración → Módulos.
+    enabledModules: {
+      recordatorios: true,
+      reserva_online: true,
+      presupuestos: false,
+      facturacion: false,
+      servicios: false,
+      equipo: false,
+      stock: false,
+      mensajes: false,
+      agentes: false,
+      resenas: false,
+    },
     locations: [
       {
-        id: "loc_garcia_1",
-        tenantId: "tnt_garcia",
-        name: "Madrid Centro",
-        address: "C/ Alcalá 120, 28009 Madrid",
-        phone: "910 234 567",
+        id: "loc_easytech_1",
+        tenantId: DEMO_TENANT_ID,
+        name: "Barcelona",
+        address: "C/ del Motor 12, 08005 Barcelona",
+        phone: "930 00 00 00",
       },
     ],
     createdAt: daysAgo(420),
   },
   customers: [
-    { name: "Lucía Moreno", phone: "612 345 678", email: "lucia.moreno@email.es" },
-    { name: "Javier Castaño", phone: "615 987 321", email: "javier.castano@email.es" },
-    { name: "Carmen Ruiz", phone: "699 112 233", email: "carmen.ruiz@email.es" },
-    { name: "Diego Herrero", phone: "627 445 889", email: "diego.herrero@email.es" },
-    { name: "Marta Gil", phone: "634 778 990", email: "marta.gil@email.es" },
+    { name: "Laia Ferrer", phone: "612 345 678", email: "laia.ferrer@email.demo" },
+    { name: "Jordi Puig", phone: "615 987 321", email: "jordi.puig@email.demo" },
+    { name: "Núria Vidal", phone: "699 112 233", email: "nuria.vidal@email.demo" },
+    { name: "Marc Soler", phone: "627 445 889", email: "marc.soler@email.demo" },
+    { name: "Anna Martí", phone: "634 778 990", email: "anna.marti@email.demo" },
+    { name: "Pau Roca", phone: "644 210 365", email: "pau.roca@email.demo" },
+    { name: "Carla Serra", phone: "655 908 412", email: "carla.serra@email.demo" },
   ],
   vehicles: [
     { make: "Seat", model: "León", year: 2019, plate: "1234 KLM", km: 78400, color: "Gris", customerIdx: 0 },
     { make: "Volkswagen", model: "Golf", year: 2017, plate: "5678 BNP", km: 112300, color: "Blanco", customerIdx: 1 },
-    { make: "Renault", model: "Mégane", year: 2020, plate: "9012 RST", km: 54100, color: "Azul", customerIdx: 2 },
-    { make: "Peugeot", model: "308", year: 2018, plate: "3456 DGH", km: 89600, color: "Negro", customerIdx: 3 },
-    { make: "Toyota", model: "Corolla", year: 2021, plate: "7890 JKL", km: 32000, color: "Gris", customerIdx: 4 },
-    { make: "Audi", model: "A3", year: 2019, plate: "2345 MNB", km: 67200, color: "Negro", customerIdx: 0 },
+    { make: "Renault", model: "Clio", year: 2020, plate: "9012 LRT", km: 54100, color: "Azul", customerIdx: 2 },
+    { make: "Citroën", model: "C4", year: 2018, plate: "3456 KDG", km: 89600, color: "Negro", customerIdx: 3 },
+    { make: "Toyota", model: "Corolla", year: 2021, plate: "7890 LJK", km: 32000, color: "Gris", customerIdx: 4 },
+    { make: "Seat", model: "Ibiza", year: 2016, plate: "2345 JMB", km: 121700, color: "Rojo", customerIdx: 5 },
+    { make: "Cupra", model: "Formentor", year: 2022, plate: "6789 MCF", km: 21500, color: "Gris", customerIdx: 6 },
+    { make: "Dacia", model: "Sandero", year: 2019, plate: "4567 KZX", km: 69800, color: "Blanco", customerIdx: 0 },
   ],
   orders: [
     {
@@ -842,12 +877,11 @@ const GARCIA: TenantSeed = {
       checkin: { km: 54100, fuel: 80 },
       inspection: INSP_MIXED,
       thread: [
-        { from: "shop", text: "Hemos recibido su vehículo, le mantendremos informado.", hAgo: 46 },
-        { from: "shop", text: "Ya tenemos el diagnóstico: hay que cambiar pastillas y discos delanteros. Le enviamos el presupuesto.", hAgo: 30 },
+        { from: "shop", text: "Hemos recibido tu coche, te mantenemos informada.", hAgo: 46 },
+        { from: "shop", text: "Ya tenemos el diagnóstico: hay que cambiar pastillas y discos delanteros. Te enviamos el presupuesto.", hAgo: 30 },
         { from: "customer", text: "Gracias. ¿El precio incluye IVA?", hAgo: 26 },
         { from: "shop", text: "Sí, todos los importes del presupuesto ya llevan el IVA incluido.", hAgo: 25 },
-        { from: "customer", text: "Perfecto. ¿Para cuándo estaría listo si lo apruebo hoy?", hAgo: 3, read: false },
-        { from: "customer", text: "Y otra cosa, ¿la garantía cubre los discos también?", hAgo: 2, read: false },
+        { from: "customer", text: "Perfecto. ¿Para cuándo estaría si lo apruebo hoy?", hAgo: 3, read: false },
       ],
       lines: [
         { type: "labor", description: "Mano de obra — frenos", qty: 2, unitPrice: 45 },
@@ -869,13 +903,12 @@ const GARCIA: TenantSeed = {
     {
       vehicleIdx: 4,
       status: "en_reparacion",
-      problem: "Distribución a los 90.000 km",
+      problem: "Cambio de la correa de distribución",
       checkin: { km: 32000, fuel: 70 },
       thread: [
-        { from: "shop", text: "Hemos recibido su vehículo, le mantendremos informado.", hAgo: 48 },
-        { from: "customer", text: "Buenos días, ¿han podido empezar ya con la distribución?", hAgo: 28 },
+        { from: "shop", text: "Hemos recibido tu coche, te mantenemos informada.", hAgo: 48 },
+        { from: "customer", text: "Buenos días, ¿habéis podido empezar con la distribución?", hAgo: 28 },
         { from: "shop", text: "Sí, estamos con ello. Aprovechamos para revisar la bomba de agua.", hAgo: 27 },
-        { from: "customer", text: "Genial, gracias por avisar.", hAgo: 26 },
         { from: "customer", text: "¿Creéis que estará para el viernes?", hAgo: 1, read: false },
       ],
       lines: [
@@ -885,17 +918,28 @@ const GARCIA: TenantSeed = {
     },
     {
       vehicleIdx: 5,
+      status: "en_reparacion",
+      problem: "Revisión de los 120.000 km",
+      checkin: { km: 121700, fuel: 40 },
+      lines: [
+        { type: "labor", description: "Mano de obra — revisión", qty: 2, unitPrice: 45 },
+        { type: "part", description: "Aceite sintético 5W30 (1L)", qty: 4, unitPrice: 10 },
+        { type: "part", description: "Filtro de aceite", qty: 1, unitPrice: 12 },
+      ],
+    },
+    {
+      vehicleIdx: 6,
       status: "listo",
       problem: "Cambio de aceite y filtros",
-      checkin: { km: 67200, fuel: 45 },
+      checkin: { km: 21500, fuel: 45 },
       thread: [
-        { from: "shop", text: "Hemos recibido su vehículo, le mantendremos informado.", hAgo: 20 },
-        { from: "shop", text: "Su coche ya está listo para recoger. ¡Le esperamos!", hAgo: 2 },
-        { from: "customer", text: "Perfecto, paso esta tarde a recogerlo. ¡Gracias!", hAgo: 1 },
+        { from: "shop", text: "Hemos recibido tu coche, te mantenemos informada.", hAgo: 20 },
+        { from: "shop", text: "Tu coche ya está listo para recoger. ¡Te esperamos!", hAgo: 2 },
+        { from: "customer", text: "Perfecto, paso esta tarde. ¡Gracias!", hAgo: 1 },
       ],
       lines: [
         { type: "labor", description: "Mano de obra — mantenimiento", qty: 1, unitPrice: 45 },
-        { type: "part", description: "Aceite sintético 5W30 (4L)", qty: 4, unitPrice: 10 },
+        { type: "part", description: "Aceite sintético 5W30 (1L)", qty: 4, unitPrice: 10 },
         { type: "part", description: "Filtro de aceite", qty: 1, unitPrice: 12 },
       ],
     },
@@ -906,7 +950,7 @@ const GARCIA: TenantSeed = {
       checkin: { km: 76000, fuel: 55 },
       inspection: INSP_OK,
       invoiceStatus: "paid",
-      review: { rating: 5, comment: "Rápidos y muy honestos. Repetiré sin duda." },
+      review: { rating: 5, comment: "Rápidos y muy claros con el precio. Repetiré." },
       lines: [
         { type: "labor", description: "Mano de obra — frenos", qty: 2, unitPrice: 45, ...BRAKE_WARRANTY },
         { type: "part", description: "Pastillas de freno delanteras", qty: 1, unitPrice: 48, ...BRAKE_WARRANTY },
@@ -916,19 +960,48 @@ const GARCIA: TenantSeed = {
       vehicleIdx: 2,
       status: "entregado",
       problem: "Cambio de batería",
-      invoiceStatus: "pending",
-      review: { rating: 4 },
+      invoiceStatus: "paid",
+      review: { rating: 5, comment: "Me avisaron por WhatsApp cuando estaba listo. Muy cómodo." },
       lines: [
         { type: "labor", description: "Mano de obra", qty: 1, unitPrice: 30 },
         { type: "part", description: "Batería 70Ah", qty: 1, unitPrice: 95, warrantyMonths: 24 },
       ],
     },
+    {
+      vehicleIdx: 7,
+      status: "entregado",
+      problem: "Alineación y equilibrado",
+      invoiceStatus: "paid",
+      review: { rating: 4, comment: "Buen trato y sin esperas." },
+      lines: [{ type: "labor", description: "Alineación y equilibrado", qty: 1, unitPrice: 70 }],
+    },
   ],
   reminders: [
     { vehicleIdx: 0, label: "Cambio de aceite", dueInDays: -8, note: "Cada 15.000 km" },
     { vehicleIdx: 1, label: "Revisión de los 120.000 km", dueKmDelta: -3000 },
-    { vehicleIdx: 4, label: "Próxima ITV", dueInDays: 25 },
+    { vehicleIdx: 4, label: "Próxima ITV", dueInDays: 12 },
+    { vehicleIdx: 5, label: "Próxima ITV", dueInDays: 25 },
+    { vehicleIdx: 7, label: "Revisión anual", dueInDays: 18 },
     { vehicleIdx: 2, label: "Rotación de neumáticos", dueInDays: 40 },
+  ],
+  // A lively week: today, tomorrow and the rest of the week (Sundays → Monday).
+  // Service index: 0 aceite · 1 frenos · 2 embrague · 3 diagnóstico ·
+  // 4 alineación · 5 batería · 6 distribución.
+  appointments: [
+    [0, 8, 30, "en_taller", "manual", 0],
+    [0, 10, 0, "confirmada", "online", 3],
+    [0, 12, 30, "programada", "manual", 1],
+    [0, 16, 0, "confirmada", "online", 4],
+    [0, 17, 30, "programada", "online", 5],
+    [1, 9, 0, "confirmada", "manual", 0],
+    [1, 11, 30, "programada", "online", 1],
+    [1, 15, 0, "programada", "online", 3],
+    [2, 9, 30, "confirmada", "manual", 6],
+    [2, 12, 0, "programada", "online", 0],
+    [3, 10, 0, "programada", "online", 4],
+    [3, 16, 30, "programada", "manual", 2],
+    [4, 9, 0, "programada", "online", 5],
+    [5, 10, 30, "programada", "online", 0],
   ],
 };
 
@@ -1192,13 +1265,16 @@ function doSeed(): void {
   usersRepo.create({
     tenantId: null,
     name: "Superadmin",
-    email: "admin@talleo.app",
+    email: "admin@easytaller.app",
     role: "superadmin",
   } as Omit<User, "id">);
 
-  seedTenant(GARCIA);
-  seedTenant(AUTONORTE);
-  seedTenant(REYES);
+  seedTenant(EASYTECH);
+  // SaaS mode shows several shops; the demo is a single shop.
+  if (!IS_DEMO) {
+    seedTenant(AUTONORTE);
+    seedTenant(REYES);
+  }
 
   writeRaw(SEED_FLAG, SEED_VERSION);
 }

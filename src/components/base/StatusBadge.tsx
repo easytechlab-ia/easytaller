@@ -49,7 +49,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   danger:
     "border-transparent text-[var(--destructive)] bg-[color-mix(in_srgb,var(--destructive)_12%,transparent)]",
   accent:
-    "border-transparent text-[var(--talleo-accent)] bg-[color-mix(in_srgb,var(--talleo-accent)_12%,transparent)]",
+    "border-transparent text-[var(--brand-accent)] bg-[color-mix(in_srgb,var(--brand-accent)_12%,transparent)]",
 };
 
 interface StatusBadgeProps {

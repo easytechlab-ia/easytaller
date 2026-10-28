@@ -96,12 +96,12 @@ function OrdersPage() {
   return (
     <div>
       <PageHeader
-        title="Órdenes"
-        description="Órdenes de reparación del taller."
+        title="En taller"
+        description="Los coches que tienes en el taller y en qué punto está cada uno."
         actions={
           <Button onClick={() => setDialogOpen(true)}>
             <Plus strokeWidth={1.5} />
-            Nueva orden
+            Entrada de coche
           </Button>
         }
       />

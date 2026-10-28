@@ -12,9 +12,10 @@ import {
   usersRepo,
 } from "@/lib/db";
 import { cn } from "@/lib/utils";
+import { DEMO_TENANT_ID, IS_DEMO } from "@/lib/mode";
 
 /** Event name used to open the hidden control panel from anywhere (logo long-press, /panel route). */
-export const OPEN_PANEL_EVENT = "talleo:open-panel";
+export const OPEN_PANEL_EVENT = "easytaller:open-panel";
 
 /** Dispatch to open the hidden control panel. */
 export function openControlPanel() {
@@ -27,7 +28,7 @@ type View = "menu" | "taller" | "cliente" | "cartilla" | "publica";
 
 /**
  * Hidden internal control panel for presentations. No visible trigger.
- * Open via: Ctrl/Cmd + Shift + K, long-press on the Talleo logo, or /panel.
+ * Open via: Ctrl/Cmd + Shift + K, long-press on the EasyTaller logo, or /panel.
  */
 export function ControlPanel() {
   const { ready, login, refresh } = useAuth();
@@ -105,7 +106,7 @@ export function ControlPanel() {
     resetDemo();
     refresh();
     close();
-    navigate({ to: "/login" });
+    navigate({ to: IS_DEMO ? "/app" : "/login" });
   };
 
   return (
@@ -137,17 +138,21 @@ export function ControlPanel() {
               <p className="px-1 pb-1 text-xs text-muted-foreground">
                 Cambiar de vista
               </p>
-              <SwitchRow
-                icon={Shield}
-                title="Superadmin"
-                subtitle="Panel del SaaS"
-                onClick={enterSuperadmin}
-              />
+              {!IS_DEMO && (
+                <SwitchRow
+                  icon={Shield}
+                  title="Superadmin"
+                  subtitle="Panel del SaaS"
+                  onClick={enterSuperadmin}
+                />
+              )}
               <SwitchRow
                 icon={Building2}
                 title="Taller"
-                subtitle="Vista del taller"
-                onClick={() => setView("taller")}
+                subtitle="Panel del taller"
+                onClick={() =>
+                  IS_DEMO ? enterTenant(DEMO_TENANT_ID) : setView("taller")
+                }
               />
               <SwitchRow
                 icon={Smartphone}
@@ -163,9 +168,16 @@ export function ControlPanel() {
               />
               <SwitchRow
                 icon={ExternalLink}
-                title="Página pública"
-                subtitle="Reserva online del taller"
-                onClick={() => setView("publica")}
+                title="Web del taller"
+                subtitle="Página pública y reserva online"
+                onClick={() => {
+                  if (IS_DEMO) {
+                    close();
+                    navigate({ to: "/" });
+                  } else {
+                    setView("publica");
+                  }
+                }}
               />
 
 

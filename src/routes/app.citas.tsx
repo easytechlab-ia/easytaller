@@ -1,4 +1,4 @@
-// Talleo — Citas (agenda). Day view with prev/next + "Hoy" + date picker, and a
+// EasyTaller — Citas (agenda). Day view with prev/next + "Hoy" + date picker, and a
 // week strip on desktop. Lists the day's appointments chronologically with
 // customer, vehicle, services, estimated duration and status. Bridges an
 // appointment into a work order. Everything is local & simulated.
@@ -248,7 +248,7 @@ function CitasPage() {
               <span
                 className={cn(
                   "text-lg font-semibold tracking-tight",
-                  isToday && !active && "text-[var(--talleo-accent)]",
+                  isToday && !active && "text-[var(--brand-accent)]",
                 )}
               >
                 {d.getDate()}

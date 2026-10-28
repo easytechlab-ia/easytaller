@@ -1,8 +1,9 @@
-// Talleo — ficha de orden (hub central). Cabecera, control de pipeline, notas,
-// mensajes al cliente, fotos y resumen de presupuesto (solo lectura), compartir.
-// Inspección y Check-in quedan como placeholders para el siguiente prompt.
+// EasyTaller — ficha de orden (hub central). Cabecera, control de estado, notas,
+// mensajes al cliente, fotos, presupuesto, inspección, check-in y compartir.
+// Al marcar "Listo" se ofrece avisar al cliente por WhatsApp con el mensaje ya
+// escrito (enlace wa.me; el envío lo hace el taller desde su WhatsApp).
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -17,6 +18,8 @@ import {
   Trash2,
   Receipt,
   BellRing,
+  MessageCircle,
+  PartyPopper,
 } from "lucide-react";
 import { PageHeader } from "@/components/base/PageHeader";
 import { EmptyState } from "@/components/base/EmptyState";
@@ -25,6 +28,14 @@ import { StatusBadge } from "@/components/base/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -56,8 +67,9 @@ import {
 } from "@/lib/invoices";
 import { compressImage } from "@/lib/image";
 import { formatDateTime } from "@/lib/format";
-import { can, canEdit } from "@/lib/permissions";
-import type { Photo, Tenant, WorkOrder } from "@/types";
+import { can, canEdit, isModuleEnabled } from "@/lib/permissions";
+import { readyMessage, whatsappUrl } from "@/lib/whatsapp";
+import type { Customer, Photo, Tenant, Vehicle, WorkOrder } from "@/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/ordenes/$id")({
@@ -71,6 +83,7 @@ function OrderDetail() {
   const { ready, user, tenant } = useAuth();
   const [version, setVersion] = useState(0);
   const [reminderOpen, setReminderOpen] = useState(false);
+  const [readyOpen, setReadyOpen] = useState(false);
   const bump = () => setVersion((v) => v + 1);
 
   const order = useMemo(() => {
@@ -97,7 +110,7 @@ function OrderDetail() {
   const mechanics = listMechanics(tenant.id);
   const transitions = nextStatuses(order.status);
   const canQuote = can(user.role, "presupuestos");
-  const canBill = can(user.role, "facturacion");
+  const canBill = can(user.role, "facturacion") && isModuleEnabled(tenant, "facturacion");
   const canScheduleReminder =
     order.status === "entregado" &&
     !!vehicle &&
@@ -107,6 +120,8 @@ function OrderDetail() {
     changeOrderStatus(tenant, order, next as WorkOrder["status"]);
     toast.success(`Estado: ${STATUS_LABELS[next as WorkOrder["status"]]}`);
     bump();
+    // The key moment of the demo: car ready → tell the customer on WhatsApp.
+    if (next === "listo") setReadyOpen(true);
   };
 
   const setMechanic = (mid: string) => {
@@ -183,7 +198,7 @@ function OrderDetail() {
           </DataCard>
 
           {/* Pipeline control */}
-          <DataCard title="Control de pipeline">
+          <DataCard title="Estado del coche">
             <p className="text-sm text-muted-foreground">
               Estado actual:{" "}
               <span className="font-medium text-foreground">
@@ -251,9 +266,23 @@ function OrderDetail() {
               </Button>
             </DataCard>
           )}
-          <ShareCard order={order} tenantName={tenant.name} />
+          <ShareCard
+            order={order}
+            tenantName={tenant.name}
+            customer={customer}
+            vehicle={vehicle}
+          />
         </div>
       </div>
+
+      <ReadyDialog
+        open={readyOpen}
+        onOpenChange={setReadyOpen}
+        order={order}
+        tenantName={tenant.name}
+        customer={customer}
+        vehicle={vehicle}
+      />
 
       {vehicle && (
         <ReminderFormDialog
@@ -550,16 +579,100 @@ function BillingCard({
   );
 }
 
+function trackingLink(order: WorkOrder): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/c/${order.accessCode}`;
+}
+
+/** After marking "Listo": prefilled WhatsApp message to the customer. */
+function ReadyDialog({
+  open,
+  onOpenChange,
+  order,
+  tenantName,
+  customer,
+  vehicle,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  order: WorkOrder;
+  tenantName: string;
+  customer?: Customer;
+  vehicle?: Vehicle;
+}) {
+  const initial = useMemo(
+    () =>
+      readyMessage({
+        customerName: customer?.name,
+        vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model}` : undefined,
+        plate: vehicle?.plate,
+        tenantName,
+        trackingUrl: trackingLink(order),
+      }),
+    [customer, vehicle, tenantName, order],
+  );
+  const [text, setText] = useState(initial);
+
+  // Fresh draft every time the dialog opens.
+  useEffect(() => {
+    if (open) setText(initial);
+  }, [open, initial]);
+
+  const send = () => {
+    window.open(whatsappUrl(customer?.phone, text), "_blank");
+    toast.success("WhatsApp abierto con el mensaje listo para enviar");
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <div className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--success)_14%,transparent)] text-[var(--success)] sm:mx-0">
+            <PartyPopper strokeWidth={1.5} className="h-6 w-6" />
+          </div>
+          <DialogTitle>¡Coche listo! ¿Avisamos al cliente?</DialogTitle>
+          <DialogDescription>
+            {customer
+              ? `Se abrirá WhatsApp con este mensaje para ${customer.name} (${customer.phone}). Solo tienes que darle a enviar.`
+              : "Se abrirá WhatsApp con este mensaje. Solo tienes que elegir el contacto y enviar."}
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={6}
+          className="text-sm"
+        />
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Ahora no
+          </Button>
+          <Button
+            onClick={send}
+            className="bg-[#25D366] text-white hover:bg-[#1ebe5b]"
+          >
+            <MessageCircle strokeWidth={1.75} />
+            Enviar por WhatsApp
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ShareCard({
   order,
   tenantName,
+  customer,
+  vehicle,
 }: {
   order: WorkOrder;
   tenantName: string;
+  customer?: Customer;
+  vehicle?: Vehicle;
 }) {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-  const link = `${origin}/c/${order.accessCode}`;
+  const link = trackingLink(order);
 
   const copy = async () => {
     try {
@@ -571,8 +684,10 @@ function ShareCard({
   };
 
   const whatsapp = () => {
-    const msg = `Hola, soy ${tenantName}. Puedes seguir el estado de tu vehículo aquí: ${link}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const firstName = customer?.name.split(" ")[0];
+    const car = vehicle ? `tu ${vehicle.make} ${vehicle.model}` : "tu coche";
+    const msg = `Hola${firstName ? ` ${firstName}` : ""}, te escribimos de ${tenantName}. Puedes seguir el estado de ${car} aquí: ${link}`;
+    window.open(whatsappUrl(customer?.phone, msg), "_blank");
   };
 
   return (
@@ -591,7 +706,7 @@ function ShareCard({
         </Button>
         <Button variant="outline" onClick={whatsapp}>
           <Share2 strokeWidth={1.5} />
-          Compartir por WhatsApp
+          Enviar seguimiento por WhatsApp
         </Button>
         <Link
           to="/c/$code"
@@ -633,7 +748,7 @@ function BackLink() {
       className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
     >
       <ArrowLeft strokeWidth={1.5} className="h-4 w-4" />
-      Órdenes
+      En taller
     </Link>
   );
 }
