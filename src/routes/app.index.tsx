@@ -28,6 +28,8 @@ import { dueReminders } from "@/lib/reminders";
 import { lowStockCount } from "@/lib/stock";
 import { listNotifications, relativeTime } from "@/lib/notifications";
 import { formatCurrency, formatTime, isToday } from "@/lib/format";
+import { isModuleEnabled } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 import type { Appointment, AppNotification } from "@/types";
 
 export const Route = createFileRoute("/app/")({
@@ -118,47 +120,86 @@ function AppDashboard() {
         title="Inicio"
         description={tenant ? `Resumen de ${tenant.name}.` : "Resumen del taller."}
       />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Coches en taller" value={stats.inShop} icon={Car} />
-        <Link to="/app/citas" className="rounded-xl">
-          <StatCard
-            label="Citas de hoy"
-            value={stats.todayAppointments}
-            icon={Calendar}
-          />
-        </Link>
-        <StatCard
-          label="Presupuestos pendientes"
-          value={stats.pendingQuotes}
-          icon={FileText}
-        />
-        <StatCard
-          label="Ingresos del mes"
-          value={formatCurrency(stats.monthRevenue, tenant?.currency)}
-          icon={Banknote}
-        />
-        <Link to="/app/recordatorios" className="rounded-xl">
-          <StatCard
-            label="Recordatorios vencidos"
-            value={stats.overdueReminders}
-            icon={BellRing}
-          />
-        </Link>
-        <Link to="/app/resenas" className="rounded-xl">
-          <StatCard
-            label="Valoración media"
-            value={stats.avgRating > 0 ? `${stats.avgRating.toFixed(1)} / 5` : "—"}
-            icon={Star}
-          />
-        </Link>
-        <Link to="/app/stock" className="rounded-xl">
-          <StatCard
-            label="Repuestos bajo stock"
-            value={stats.lowStock}
-            icon={Boxes}
-          />
-        </Link>
-      </div>
+      {(() => {
+        // Only show the figures of the modules this shop has switched on.
+        const on = (m: string) => isModuleEnabled(tenant, m);
+        const cards: Array<{ key: string; to?: string; node: React.ReactNode }> = [
+          {
+            key: "inShop",
+            to: "/app/ordenes",
+            node: <StatCard label="Coches en taller" value={stats.inShop} icon={Car} />,
+          },
+          {
+            key: "today",
+            to: "/app/citas",
+            node: <StatCard label="Citas de hoy" value={stats.todayAppointments} icon={Calendar} />,
+          },
+        ];
+        if (on("recordatorios"))
+          cards.push({
+            key: "reminders",
+            to: "/app/recordatorios",
+            node: <StatCard label="Avisos vencidos" value={stats.overdueReminders} icon={BellRing} />,
+          });
+        if (on("presupuestos"))
+          cards.push({
+            key: "quotes",
+            to: "/app/presupuestos",
+            node: <StatCard label="Presupuestos pendientes" value={stats.pendingQuotes} icon={FileText} />,
+          });
+        if (on("facturacion"))
+          cards.push({
+            key: "revenue",
+            to: "/app/facturacion",
+            node: (
+              <StatCard
+                label="Ingresos del mes"
+                value={formatCurrency(stats.monthRevenue, tenant?.currency)}
+                icon={Banknote}
+              />
+            ),
+          });
+        if (on("resenas"))
+          cards.push({
+            key: "rating",
+            to: "/app/resenas",
+            node: (
+              <StatCard
+                label="Valoración media"
+                value={stats.avgRating > 0 ? `${stats.avgRating.toFixed(1)} / 5` : "—"}
+                icon={Star}
+              />
+            ),
+          });
+        if (on("stock"))
+          cards.push({
+            key: "stock",
+            to: "/app/stock",
+            node: <StatCard label="Repuestos bajo stock" value={stats.lowStock} icon={Boxes} />,
+          });
+        return (
+          <div
+            className={cn(
+              "grid grid-cols-2 gap-4",
+              cards.length === 3 ? "sm:grid-cols-3" : "lg:grid-cols-4",
+            )}
+          >
+            {cards.map((c, i) => (
+              <Link
+                key={c.key}
+                to={c.to as "/app"}
+                className={cn(
+                  "rounded-xl",
+                  // An odd card count on mobile: let the last one span the row.
+                  cards.length % 2 === 1 && i === cards.length - 1 && "col-span-2 sm:col-span-1",
+                )}
+              >
+                {c.node}
+              </Link>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="mt-8 grid gap-4 lg:grid-cols-2">
         <DataCard title="Actividad reciente">
