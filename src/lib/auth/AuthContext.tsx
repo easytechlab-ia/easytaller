@@ -10,6 +10,7 @@ import type { Tenant, User } from "@/types";
 import { tenantsRepo, usersRepo } from "@/lib/db";
 import { seedIfEmpty } from "@/lib/db";
 import { readRaw, writeRaw } from "@/lib/db/storage";
+import { DEMO_TENANT_ID, IS_DEMO } from "@/lib/mode";
 
 interface Session {
   userId: string;
@@ -53,14 +54,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hydrate = () => {
     const session = loadSession();
-    if (session) {
-      const u = usersRepo.getById(session.userId) ?? null;
-      setUser(u);
-      setTenant(session.tenantId ? (tenantsRepo.getById(session.tenantId) ?? null) : null);
-    } else {
-      setUser(null);
-      setTenant(null);
+    const u = session ? (usersRepo.getById(session.userId) ?? null) : null;
+    const t = session?.tenantId ? (tenantsRepo.getById(session.tenantId) ?? null) : null;
+
+    // Demo mode has no login: always enter as the owner of the demo shop.
+    if (IS_DEMO && (!u || !t || t.id !== DEMO_TENANT_ID)) {
+      const owner = usersRepo
+        .list()
+        .find((x) => x.tenantId === DEMO_TENANT_ID && x.role === "owner");
+      const demoTenant = tenantsRepo.getById(DEMO_TENANT_ID) ?? null;
+      if (owner && demoTenant) {
+        setUser(owner);
+        setTenant(demoTenant);
+        saveSession({ userId: owner.id, tenantId: demoTenant.id });
+        return;
+      }
     }
+
+    setUser(u);
+    setTenant(u ? t : null);
   };
 
   useEffect(() => {

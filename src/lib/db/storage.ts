@@ -1,12 +1,12 @@
-// Talleo — low-level storage layer.
+// EasyTaller — low-level storage layer.
 // The ONLY place that touches localStorage. Components must never read/write
 // localStorage directly; they go through repositories built on top of this.
 //
 // Key scheme:
-//   talleo:{tenantId}:{collection}   — per-tenant collections
-//   talleo:global:{collection}       — global collections (tenants, plans, users)
+//   easytaller:{tenantId}:{collection}   — per-tenant collections
+//   easytaller:global:{collection}       — global collections (tenants, plans, users)
 
-const PREFIX = "talleo";
+const PREFIX = "easytaller";
 export const GLOBAL = "global";
 
 function storageAvailable(): boolean {
@@ -41,7 +41,7 @@ export function write<T>(
     );
   } catch (err) {
     // Likely quota exceeded (base64 photos/signatures).
-    console.error("Talleo storage write failed", err);
+    console.error("EasyTaller storage write failed", err);
   }
 }
 
@@ -56,7 +56,7 @@ export function writeRaw(key: string, value: string): void {
   window.localStorage.setItem(`${PREFIX}:${key}`, value);
 }
 
-/** Remove every Talleo key. Used by resetDemo(). */
+/** Remove every EasyTaller key. Used by resetDemo(). */
 export function clearAll(): void {
   if (!storageAvailable()) return;
   const toRemove: string[] = [];
