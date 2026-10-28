@@ -1066,7 +1066,7 @@ function OrderInvoiceSection({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-muted-foreground">
           <ReceiptText strokeWidth={1.5} className="h-4 w-4" />
-          <h2 className="text-sm font-semibold text-foreground">Factura</h2>
+          <h2 className="text-sm font-semibold text-foreground">Resumen del trabajo</h2>
         </div>
         <Button
           variant="outline"
@@ -1086,6 +1086,7 @@ function OrderInvoiceSection({
           vehicle={vehicle}
           location={location}
           printId="invoice-customer"
+          variant="customer"
         />
       </div>
     </section>
