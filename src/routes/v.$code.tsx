@@ -1,4 +1,4 @@
-// Talleo — cartilla permanente del vehículo (/v/:code). Acceso público estable
+// EasyTaller — cartilla permanente del vehículo (/v/:code). Acceso público estable
 // por vehículo, independiente de la orden: cabecera del coche, orden en curso
 // con enlace a la vista en vivo, historial completo (vía VehicleHistory),
 // próximas revisiones y garantías vigentes. Read-only, todo local y simulado.
@@ -21,7 +21,7 @@ import {
   Wallet,
   Wrench,
 } from "lucide-react";
-import { Logo } from "@/components/Logo";
+import { HeroPill, ShopHero, ShopPage } from "@/components/public/ShopChrome";
 import { PublicLoading } from "@/components/PublicLoading";
 import { VehicleHistory } from "@/components/VehicleHistory";
 import { DocumentStatusBadge } from "@/components/app/DocumentStatusBadge";
@@ -147,40 +147,35 @@ function CartillaView() {
     techSpecs.push(["Cilindrada", `${vehicle.displacementCc} cc`]);
   if (vehicle.powerHp) techSpecs.push(["Potencia", `${vehicle.powerHp} CV`]);
 
+  const carName = `${vehicle.make} ${vehicle.model}`.trim() || "Tu vehículo";
+  const nextReminder = pendingReminders
+    .slice()
+    .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""))[0];
+
   return (
-    <div
-      className="min-h-screen bg-background-subtle"
-      style={
-        { ["--talleo-accent" as string]: tenant.accentColor } as React.CSSProperties
+    <ShopPage
+      tenant={tenant}
+      hero={
+        <ShopHero
+          tenant={tenant}
+          eyebrow="Cartilla de tu coche"
+          title={carName}
+        >
+          <p className="flex flex-wrap gap-2">
+            <HeroPill tenant={tenant}>
+              <span className="font-mono">{vehicle.plate}</span>
+            </HeroPill>
+            {activeOrder ? (
+              <HeroPill tenant={tenant}>Ahora en el taller</HeroPill>
+            ) : nextReminder?.dueDate ? (
+              <HeroPill tenant={tenant}>
+                Próxima cita: {nextReminder.label} · {formatDate(nextReminder.dueDate)}
+              </HeroPill>
+            ) : null}
+          </p>
+        </ShopHero>
       }
     >
-      {/* Branding */}
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-5 py-4">
-          {tenant.logoUrl ? (
-            <img
-              src={tenant.logoUrl}
-              alt={tenant.name}
-              className="h-7 w-auto max-w-[140px] object-contain"
-            />
-          ) : (
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: tenant.accentColor }}
-              />
-              <span className="text-base font-bold tracking-tight text-foreground">
-                {tenant.name}
-              </span>
-            </div>
-          )}
-          <span className="font-mono text-xs tracking-wider text-muted-foreground">
-            {vehicle.accessCode}
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-lg space-y-4 px-5 py-6">
         {/* Vehicle header */}
         <section className="overflow-hidden rounded-xl border border-border bg-card">
           {cover && (
@@ -191,20 +186,7 @@ function CartillaView() {
             />
           )}
           <div className="p-5">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-border text-foreground">
-              <Car strokeWidth={1.5} className="h-5 w-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-base font-semibold text-foreground">
-                {`${vehicle.make} ${vehicle.model}`.trim() || "Vehículo"}
-              </p>
-              <p className="font-mono text-sm text-muted-foreground">
-                {vehicle.plate}
-              </p>
-            </div>
-          </div>
-          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <dl className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-xs text-muted-foreground">Año</dt>
               <dd className="text-foreground">
@@ -521,11 +503,7 @@ function CartillaView() {
           </div>
         </section>
 
-        <p className="pt-2 text-center text-xs text-muted-foreground">
-          <Logo showMark={false} className="text-xs font-semibold" />
-        </p>
-      </main>
-    </div>
+    </ShopPage>
   );
 }
 
@@ -563,7 +541,7 @@ function SpendBreakdown({
   currency: string;
 }) {
   const typeRows: Array<{ label: string; value: number; color: string }> = [
-    { label: "Mano de obra", value: spend.byType.labor, color: "var(--talleo-accent)" },
+    { label: "Mano de obra", value: spend.byType.labor, color: "var(--brand-accent)" },
     { label: "Repuestos", value: spend.byType.part, color: "var(--foreground-subtle)" },
   ].filter((r) => r.value > 0);
   const typeMax = Math.max(1, ...typeRows.map((r) => r.value));
@@ -604,7 +582,7 @@ function SpendBreakdown({
               <div key={y.year} className="flex flex-1 flex-col items-center gap-1">
                 <div className="flex h-20 w-full items-end">
                   <div
-                    className="w-full rounded-t bg-[var(--talleo-accent)]"
+                    className="w-full rounded-t bg-primary"
                     style={{ height: `${Math.max(6, (y.total / yearMax) * 100)}%` }}
                     title={formatCurrency(y.total, currency)}
                   />
@@ -648,17 +626,17 @@ function KmChart({ history }: { history: KmHistory }) {
         className="h-auto w-full"
         preserveAspectRatio="none"
       >
-        <path d={area} fill="var(--talleo-accent)" opacity={0.12} />
+        <path d={area} fill="var(--brand-accent)" opacity={0.12} />
         <path
           d={line}
           fill="none"
-          stroke="var(--talleo-accent)"
+          stroke="var(--brand-accent)"
           strokeWidth={2}
           strokeLinejoin="round"
           strokeLinecap="round"
         />
         {coords.map((c, i) => (
-          <circle key={i} cx={c.x} cy={c.y} r={2.5} fill="var(--talleo-accent)" />
+          <circle key={i} cx={c.x} cy={c.y} r={2.5} fill="var(--brand-accent)" />
         ))}
       </svg>
       <p className="mt-2 text-xs text-muted-foreground">
