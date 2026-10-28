@@ -20,7 +20,7 @@ import {
   Star,
   ExternalLink,
 } from "lucide-react";
-import { Logo } from "@/components/Logo";
+import { HeroPill, ShopHero, ShopPage } from "@/components/public/ShopChrome";
 import { PublicLoading } from "@/components/PublicLoading";
 import { VehicleHistory } from "@/components/VehicleHistory";
 import { useAuth } from "@/lib/auth/AuthContext";
@@ -85,6 +85,17 @@ const TIMELINE: Array<{ status: WorkOrderStatus; label: string }> = [
   { status: "entregado", label: "Entregado" },
 ];
 
+// Big line at the top of the page for each repair status.
+const STATUS_HEADLINE: Partial<Record<WorkOrderStatus, string>> = {
+  recibido: "Hemos recibido tu coche",
+  diagnostico: "Estamos revisando tu coche",
+  presupuesto_enviado: "Tienes un presupuesto para revisar",
+  aprobado: "Presupuesto aprobado",
+  en_reparacion: "Tu coche está en reparación",
+  listo: "¡Tu coche está listo para recoger!",
+  entregado: "Coche entregado. ¡Gracias!",
+};
+
 const SEMAPHORE: Record<
   InspectionItem["status"],
   { label: string; color: string; icon: typeof Check }
@@ -147,58 +158,33 @@ function GuestView() {
     .slice()
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
+  const statusLine =
+    order.status === "cancelado"
+      ? "Reparación cancelada"
+      : STATUS_HEADLINE[order.status] ?? TIMELINE[currentIdx]?.label;
+
   return (
-    <div
-      className="min-h-screen bg-background-subtle"
-      style={{ ["--talleo-accent" as string]: tenant.accentColor } as React.CSSProperties}
-    >
-      {/* Branding */}
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-5 py-4">
-          {tenant.logoUrl ? (
-            <img
-              src={tenant.logoUrl}
-              alt={tenant.name}
-              className="h-7 w-auto max-w-[140px] object-contain"
-            />
-          ) : (
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: tenant.accentColor }}
-              />
-              <span className="text-base font-bold tracking-tight text-foreground">
-                {tenant.name}
-              </span>
-            </div>
-          )}
-          <span className="font-mono text-xs tracking-wider text-muted-foreground">
-            {order.accessCode}
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-lg space-y-4 px-5 py-6">
-        {/* Vehicle */}
-        <section className="rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-border text-foreground">
-              <Car strokeWidth={1.5} className="h-5 w-5" />
+    <ShopPage
+      tenant={tenant}
+      hero={
+        <ShopHero
+          tenant={tenant}
+          eyebrow={
+            <span className="inline-flex items-center gap-1.5">
+              <Car strokeWidth={1.75} className="h-4 w-4" />
+              {vehicle ? `${vehicle.make} ${vehicle.model}` : "Tu vehículo"}
+              {vehicle?.plate && <span className="font-mono">· {vehicle.plate}</span>}
             </span>
-            <div>
-              <p className="text-base font-semibold text-foreground">
-                {vehicle ? `${vehicle.make} ${vehicle.model}` : "Vehículo"}
-              </p>
-              <p className="font-mono text-sm text-muted-foreground">
-                {vehicle?.plate ?? "—"}
-              </p>
-            </div>
-          </div>
-          <p className="mt-4 text-sm text-muted-foreground">
-            {order.problemDescription}
+          }
+          title={statusLine}
+        >
+          {order.problemDescription && <p>{order.problemDescription}</p>}
+          <p className="mt-3">
+            <HeroPill tenant={tenant}>Código {order.accessCode}</HeroPill>
           </p>
-        </section>
-
+        </ShopHero>
+      }
+    >
         {/* Timeline */}
         <section className="rounded-xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold text-foreground">
@@ -215,16 +201,10 @@ function GuestView() {
                     <span
                       className={cn(
                         "flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold",
-                        done && "border-transparent text-primary-foreground",
-                        current && "border-transparent text-primary-foreground",
+                        (done || current) && "border-transparent bg-primary text-primary-foreground",
                         !done && !current &&
                           "border-border bg-background text-muted-foreground",
                       )}
-                      style={
-                        done || current
-                          ? { backgroundColor: tenant.accentColor }
-                          : undefined
-                      }
                     >
                       {done ? <Check strokeWidth={2} className="h-3.5 w-3.5" /> : i + 1}
                     </span>
@@ -232,13 +212,8 @@ function GuestView() {
                       <span
                         className={cn(
                           "w-px flex-1",
-                          i < currentIdx ? "" : "bg-border",
+                          i < currentIdx ? "bg-primary" : "bg-border",
                         )}
-                        style={
-                          i < currentIdx
-                            ? { backgroundColor: tenant.accentColor }
-                            : undefined
-                        }
                       />
                     )}
                   </div>
@@ -311,11 +286,7 @@ function GuestView() {
           }}
         />
 
-        <p className="pt-2 text-center text-xs text-muted-foreground">
-          <Logo showMark={false} className="text-xs font-semibold" />
-        </p>
-      </main>
-    </div>
+    </ShopPage>
   );
 }
 
@@ -1152,7 +1123,7 @@ function VehicleHistorySection({
           <Link
             to="/v/$code"
             params={{ code: vehicle.accessCode }}
-            className="inline-flex items-center gap-1 text-xs font-medium text-foreground underline-offset-2 hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
           >
             Ver cartilla del coche
             <ExternalLink strokeWidth={1.5} className="h-3.5 w-3.5" />
