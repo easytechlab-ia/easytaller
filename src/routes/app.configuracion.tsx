@@ -1,4 +1,4 @@
-// Talleo — Configuración del taller. Edita datos generales, fiscales, moneda/IVA,
+// EasyTaller — Configuración del taller. Edita datos generales, fiscales, moneda/IVA,
 // marca (acento + logo) y horario de atención del tenant activo. Guarda vía
 // tenantsRepo.update y refresca la sesión para que el cambio se propague a
 // cabecera, factura y vista cliente. Todo local y simulado.
@@ -38,7 +38,7 @@ const CURRENCIES = ["EUR", "MXN", "USD", "GBP", "ARS", "COP", "ZAR"];
 
 const ACCENT_PRESETS = [
   "#101010",
-  "#2F6FED",
+  "#1877D6",
   "#0F766E",
   "#B45309",
   "#7C3AED",
@@ -60,10 +60,14 @@ const MODULE_INFO: Record<
   ToggleableModule,
   { label: string; description: string }
 > = {
+  presupuestos: { label: "Presupuestos", description: "Listado de presupuestos enviados y su aprobación." },
+  facturacion: { label: "Facturación", description: "Facturas de las reparaciones entregadas y cobros." },
+  servicios: { label: "Servicios", description: "Catálogo de servicios y precios del taller." },
+  equipo: { label: "Equipo", description: "Usuarios del taller y sus permisos." },
   stock: { label: "Stock", description: "Inventario de repuestos y avisos de bajo stock." },
   mensajes: { label: "Mensajes", description: "Bandeja de chat con los clientes por orden." },
   agentes: { label: "Agentes", description: "Asistente que atiende la bandeja automáticamente. Requiere Mensajes." },
-  recordatorios: { label: "Recordatorios", description: "Mantenimientos y vencimientos de documentos." },
+  recordatorios: { label: "Avisos", description: "Recordatorios de ITV, revisiones y vencimientos de documentos." },
   resenas: { label: "Reseñas", description: "Valoraciones de clientes tras la entrega." },
   reserva_online: { label: "Reserva online", description: "Asistente de cita en la página pública del taller." },
 };
@@ -71,14 +75,10 @@ const MODULE_INFO: Record<
 // Core modules — always active (informative, no switch).
 const CORE_MODULE_LABELS = [
   "Inicio",
-  "Órdenes",
+  "En taller",
   "Clientes",
   "Vehículos",
   "Citas",
-  "Presupuestos",
-  "Facturación",
-  "Servicios",
-  "Equipo",
   "Configuración",
 ];
 
@@ -212,7 +212,7 @@ function ConfigPage() {
 
   return (
     <div
-      style={{ ["--talleo-accent" as string]: accentColor } as React.CSSProperties}
+      style={{ ["--brand-accent" as string]: accentColor } as React.CSSProperties}
     >
       <PageHeader
         title="Configuración"
@@ -352,7 +352,7 @@ function ConfigPage() {
                     className="h-full w-full object-contain"
                   />
                 ) : (
-                  <span className="text-xs text-muted-foreground">Talleo</span>
+                  <span className="text-xs text-muted-foreground">EasyTaller</span>
                 )}
               </div>
               <div className="flex flex-col gap-2">
