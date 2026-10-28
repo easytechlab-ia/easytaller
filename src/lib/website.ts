@@ -49,10 +49,17 @@ export interface WebsiteServiceSettings {
   description?: string;
 }
 
+export type HeroBackground = "color" | "photo";
+
 export interface WebsiteSettings {
   id: string; // = tenantId (one record per shop)
   tagline: string;
   about: string;
+  // Header (hero) of the website: a solid colour or a photo with a dark veil.
+  heroBackground: HeroBackground;
+  heroColor: string;
+  heroPhoto?: string; // compressed base64 image
+  heroOverlay: number; // 0–80 (% of black over the photo, keeps text readable)
   whatsapp?: string; // empty → uses the shop phone
   show: Record<WebsiteBlock, boolean>;
   services: Record<string, WebsiteServiceSettings>; // by service id
@@ -76,6 +83,9 @@ export function defaultWebsiteSettings(tenant: Tenant): WebsiteSettings {
   return {
     id: tenant.id,
     tagline: "Tu taller de confianza, sin sorpresas",
+    heroBackground: "color",
+    heroColor: "#0e2a47",
+    heroOverlay: 55,
     about: `En ${tenant.name} cuidamos de tu coche como si fuera nuestro: te explicamos qué necesita, te damos presupuesto antes de empezar y te avisamos en cuanto está listo.`,
     whatsapp: "",
     show: {
@@ -139,3 +149,24 @@ export function servicePriceLabel(
 export function websiteWhatsapp(tenant: Tenant, settings: WebsiteSettings): string | undefined {
   return settings.whatsapp?.trim() || tenant.phone || tenant.locations[0]?.phone;
 }
+
+/** Suggested header colours (dark ones keep white text; the last is light). */
+export const HERO_COLOR_PRESETS = [
+  "#0e2a47", // azul marino
+  "#1877d6", // azul EasyTech
+  "#18181b", // negro
+  "#374151", // gris grafito
+  "#7f1d1d", // rojo oscuro
+  "#14532d", // verde oscuro
+  "#f4f4f5", // gris claro
+];
+
+/** Suggested main colours for buttons, links and the panel. */
+export const ACCENT_COLOR_PRESETS = [
+  "#1877d6", // azul EasyTech
+  "#c8102e", // rojo
+  "#e8590c", // naranja
+  "#15803d", // verde
+  "#6d28d9", // morado
+  "#18181b", // negro
+];

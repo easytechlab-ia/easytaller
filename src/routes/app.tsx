@@ -37,6 +37,7 @@ import { evaluateLowStock } from "@/lib/stock";
 import { unreadMessagesCount } from "@/lib/inbox";
 import { cn } from "@/lib/utils";
 import { IS_DEMO } from "@/lib/mode";
+import { accentVars, useAccentOnRoot } from "@/lib/colors";
 import {
   Sheet,
   SheetContent,
@@ -119,6 +120,9 @@ function AppLayout() {
     }
   }, [ready, tenant]);
 
+  // Dialogs and sheets render outside the layout, so they get the colour too.
+  useAccentOnRoot(tenant?.accentColor);
+
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background" />
@@ -140,9 +144,8 @@ function AppLayout() {
   // Unread customer messages badge (recomputed on every navigation).
   const unreadMessages = unreadMessagesCount(tenant.id);
 
-  const accentStyle = tenant
-    ? ({ ["--brand-accent" as string]: tenant.accentColor } as React.CSSProperties)
-    : undefined;
+  // The shop's main colour (chosen in "Mi web") themes the whole panel.
+  const accentStyle = accentVars(tenant.accentColor);
 
   return (
     <div className="flex min-h-screen bg-background" style={accentStyle}>
