@@ -37,6 +37,7 @@ import { evaluateLowStock } from "@/lib/stock";
 import { unreadMessagesCount } from "@/lib/inbox";
 import { cn } from "@/lib/utils";
 import { IS_DEMO } from "@/lib/mode";
+import { accentVars, useAccentOnRoot } from "@/lib/colors";
 import {
   Sheet,
   SheetContent,
@@ -55,6 +56,7 @@ const NAV = [
   { to: "/app/clientes", label: "Clientes", icon: Users, exact: false, module: "clientes" },
   { to: "/app/vehiculos", label: "Vehículos", icon: Car, exact: false, module: "vehiculos" },
   { to: "/app/recordatorios", label: "Avisos", icon: BellRing, exact: false, module: "recordatorios" },
+  { to: "/app/web", label: "Mi web", icon: Globe, exact: false, module: "web" },
   { to: "/app/presupuestos", label: "Presupuestos", icon: FileText, exact: false, module: "presupuestos" },
   { to: "/app/facturacion", label: "Facturación", icon: Receipt, exact: false, module: "facturacion" },
   { to: "/app/servicios", label: "Servicios", icon: Tag, exact: false, module: "servicios" },
@@ -118,6 +120,9 @@ function AppLayout() {
     }
   }, [ready, tenant]);
 
+  // Dialogs and sheets render outside the layout, so they get the colour too.
+  useAccentOnRoot(tenant?.accentColor);
+
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background" />
@@ -139,9 +144,8 @@ function AppLayout() {
   // Unread customer messages badge (recomputed on every navigation).
   const unreadMessages = unreadMessagesCount(tenant.id);
 
-  const accentStyle = tenant
-    ? ({ ["--brand-accent" as string]: tenant.accentColor } as React.CSSProperties)
-    : undefined;
+  // The shop's main colour (chosen in "Mi web") themes the whole panel.
+  const accentStyle = accentVars(tenant.accentColor);
 
   return (
     <div className="flex min-h-screen bg-background" style={accentStyle}>

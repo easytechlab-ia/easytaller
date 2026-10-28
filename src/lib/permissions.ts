@@ -19,6 +19,7 @@ export type AppModule =
   | "recordatorios"
   | "resenas"
   | "equipo"
+  | "web"
   | "configuracion";
 
 // Modules each role can access. "all" = unrestricted (owner / superadmin).
@@ -102,6 +103,7 @@ export const CORE_MODULES = [
   "clientes",
   "vehiculos",
   "citas",
+  "web",
   "configuracion",
 ] as const;
 
@@ -141,6 +143,7 @@ export function moduleForPath(pathname: string): AppModule | null {
   if (p.startsWith("/app/recordatorios")) return "recordatorios";
   if (p.startsWith("/app/resenas")) return "resenas";
   if (p.startsWith("/app/equipo")) return "equipo";
+  if (p.startsWith("/app/web")) return "web";
   if (p.startsWith("/app/configuracion")) return "configuracion";
   return null;
 }

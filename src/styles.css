@@ -67,6 +67,7 @@
   --brand-sky: #7dc2fc; /* "Tech" */
   --brand-cyan: #29b6f6; /* icon gradient start */
   --brand-soft: #eaf4fe; /* tinted surfaces */
+  --brand-ink: #0e2a47; /* deep navy for strong surfaces (public website hero) */
   --brand-gradient: linear-gradient(135deg, var(--brand-cyan) 0%, var(--brand-blue) 100%);
 
   /* Interactive accent: logo blue, one step darker so white text stays legible */

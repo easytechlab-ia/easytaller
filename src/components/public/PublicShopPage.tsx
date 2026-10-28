@@ -1,9 +1,8 @@
-// EasyTaller — public page of a shop: /t/:slug, and "/" in demo mode. No login. Branded
-// with the tenant's logo, accent color, name, address/phone and opening hours.
-// The booking is a multi-step wizard (services → vehicle → date → details →
-// summary). Submitting reuses/creates the customer (by phone) and vehicle, then
-// creates an online appointment with a notification via requestOnlineAppointment.
-// The shop location is shown as a keyless Google Maps embed. Everything else is
+// EasyTaller — public website of a shop: /t/:slug, and "/" in demo mode.
+// No login. What it shows (services, prices, hours, phone, WhatsApp, address,
+// reviews, online booking) is decided by the owner in "Mi web" (/app/web).
+// Contact details, address and hours come from the shop; the booking wizard
+// creates an online appointment that lands in the shop agenda. Everything is
 // local & simulated.
 
 import { useMemo, useState } from "react";
@@ -13,25 +12,35 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Calendar,
+  CalendarCheck,
   Check,
   Clock,
   MapPin,
+  MessageCircle,
   Navigation,
   Phone,
+  Star,
 } from "lucide-react";
-import { Logo } from "@/components/Logo";
 import { PublicLoading } from "@/components/PublicLoading";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { findTenantBySlug, servicesRepo } from "@/lib/db";
+import { customersRepo, findTenantBySlug, servicesRepo } from "@/lib/db";
 import { requestOnlineAppointment } from "@/lib/appointments";
 import { isModuleEnabled } from "@/lib/permissions";
+import { listReviews } from "@/lib/reviews";
+import {
+  getWebsiteSettings,
+  serviceWebSettings,
+  servicePriceLabel,
+  websiteWhatsapp,
+} from "@/lib/website";
+import { whatsappUrl } from "@/lib/whatsapp";
+import { accentVars, isDark, useAccentOnRoot } from "@/lib/colors";
 import { cn } from "@/lib/utils";
-import type { Service, Tenant } from "@/types";
+import type { BusinessDay, Service, Tenant } from "@/types";
 
 const DAY_LABELS = [
   "Lunes",
@@ -45,7 +54,7 @@ const DAY_LABELS = [
 
 const STEPS = ["Servicio", "Vehículo", "Fecha", "Tus datos", "Resumen"] as const;
 
-/** Public page of a shop (also the home page "/" in demo mode). */
+/** Public website of a shop (also the home page "/" in demo mode). */
 export function PublicBookingPage({ slug }: { slug: string }) {
   const { ready } = useAuth();
   const tenant = useMemo(
@@ -53,9 +62,6 @@ export function PublicBookingPage({ slug }: { slug: string }) {
     [ready, slug],
   );
 
-  // Until the client is mounted and the localStorage lookup has run (after
-  // seedIfEmpty, signalled by `ready`), show a branded loading state instead
-  // of flashing the "not found" error during SSR/hydration.
   if (!ready) {
     return <PublicLoading />;
   }
@@ -66,9 +72,7 @@ export function PublicBookingPage({ slug }: { slug: string }) {
         <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground">
           <AlertCircle strokeWidth={1.5} className="h-6 w-6" />
         </div>
-        <h1 className="text-lg font-semibold text-foreground">
-          Taller no encontrado
-        </h1>
+        <h1 className="text-lg font-semibold text-foreground">Taller no encontrado</h1>
         <p className="max-w-xs text-sm text-muted-foreground">
           No existe ningún taller en esta dirección. Comprueba el enlace.
         </p>
@@ -76,16 +80,467 @@ export function PublicBookingPage({ slug }: { slug: string }) {
     );
   }
 
-  return <BookingFlow tenant={tenant} />;
+  return <ShopWebsite tenant={tenant} />;
 }
 
+// ---- helpers ----------------------------------------------------------------
 
-function BookingFlow({ tenant }: { tenant: Tenant }) {
-  const services = useMemo<Service[]>(
+/** Monday = 0 … Sunday = 6 (same order as businessHours). */
+function todayIndex(d = new Date()): number {
+  return (d.getDay() + 6) % 7;
+}
+
+function hhmm(d = new Date()): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** "Abierto ahora, hasta las 19:00" / "Cerrado. Abrimos mañana a las 08:00". */
+function openStatus(hours?: BusinessDay[]): { open: boolean; text: string } | null {
+  if (!hours || hours.length !== 7) return null;
+  const now = new Date();
+  const i = todayIndex(now);
+  const t = hhmm(now);
+  const today = hours[i];
+  if (today.open && t >= today.from && t < today.to) {
+    return { open: true, text: `Abierto ahora, hasta las ${today.to}` };
+  }
+  if (today.open && t < today.from) {
+    return { open: false, text: `Cerrado. Abrimos hoy a las ${today.from}` };
+  }
+  for (let k = 1; k <= 7; k++) {
+    const day = hours[(i + k) % 7];
+    if (day.open) {
+      const when = k === 1 ? "mañana" : `el ${DAY_LABELS[(i + k) % 7].toLowerCase()}`;
+      return { open: false, text: `Cerrado. Abrimos ${when} a las ${day.from}` };
+    }
+  }
+  return { open: false, text: "Cerrado" };
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((w) => w && w[0] === w[0].toUpperCase())
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("");
+}
+
+// ---- the website --------------------------------------------------------------
+
+function ShopWebsite({ tenant }: { tenant: Tenant }) {
+  const settings = useMemo(() => getWebsiteSettings(tenant), [tenant]);
+  const show = settings.show;
+  const location = tenant.locations[0];
+  const phone = tenant.phone ?? location?.phone;
+  const whatsapp = websiteWhatsapp(tenant, settings);
+  const address = location?.address;
+  const status = openStatus(tenant.businessHours);
+  const bookingOn = show.booking && isModuleEnabled(tenant, "reserva_online");
+
+  const allServices = useMemo<Service[]>(
     () => servicesRepo.list(tenant.id).sort((a, b) => a.name.localeCompare(b.name)),
     [tenant.id],
   );
+  const webServices = useMemo(
+    () => allServices.filter((s) => serviceWebSettings(settings, s).showOnWeb),
+    [allServices, settings],
+  );
 
+  const accentStyle = accentVars(tenant.accentColor);
+  useAccentOnRoot(tenant.accentColor);
+
+  // Header: a solid colour or a photo with a dark veil. Text and outline
+  // buttons switch to white or dark depending on the background.
+  const heroPhoto = settings.heroBackground === "photo" && settings.heroPhoto;
+  const heroDark = heroPhoto ? true : isDark(settings.heroColor);
+  const heroStyle: React.CSSProperties = heroPhoto
+    ? {
+        backgroundImage: `linear-gradient(rgba(0,0,0,${settings.heroOverlay / 100}), rgba(0,0,0,${settings.heroOverlay / 100})), url(${settings.heroPhoto})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : { backgroundColor: settings.heroColor };
+  const heroOutline = heroDark
+    ? "h-12 border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white"
+    : "h-12 border-slate-900/20 bg-transparent text-slate-900 hover:bg-slate-900/5 hover:text-slate-900";
+
+  const waLink = whatsapp
+    ? whatsappUrl(whatsapp, `Hola ${tenant.name}, os escribo desde vuestra web.`)
+    : undefined;
+
+  const actions = {
+    booking: bookingOn,
+    phone: show.phone && !!phone,
+    whatsapp: show.whatsapp && !!waLink,
+  };
+
+  return (
+    <div className="min-h-screen bg-background pb-24 md:pb-0" style={accentStyle}>
+      {/* Top bar */}
+      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-3">
+          <a href="#inicio" className="flex min-w-0 items-center gap-2.5">
+            {tenant.logoUrl ? (
+              <img src={tenant.logoUrl} alt="" className="h-9 w-9 rounded-lg object-contain" />
+            ) : (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-sm font-bold text-primary-foreground">
+                {initials(tenant.name)}
+              </span>
+            )}
+            <span className="truncate font-display text-lg font-bold tracking-tight text-foreground">
+              {tenant.name}
+            </span>
+          </a>
+          <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
+            {show.services && webServices.length > 0 && (
+              <a href="#servicios" className="hover:text-foreground">Servicios</a>
+            )}
+            {show.reviews && <a href="#opiniones" className="hover:text-foreground">Opiniones</a>}
+            {(show.address || show.hours) && (
+              <a href="#donde" className="hover:text-foreground">Dónde estamos</a>
+            )}
+            {bookingOn && (
+              <Button asChild size="sm">
+                <a href="#cita">Pedir cita</a>
+              </Button>
+            )}
+          </nav>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section
+        id="inicio"
+        className={cn("relative overflow-hidden", heroDark ? "text-white" : "text-slate-900")}
+        style={heroStyle}
+      >
+        <div className="mx-auto max-w-5xl px-5 pb-14 pt-12 sm:pb-20 sm:pt-16">
+          {show.hours && status && (
+            <p
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium",
+                heroDark ? "bg-white/10" : "bg-slate-900/5",
+                !status.open && "opacity-80",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  status.open ? "bg-[#22c55e]" : heroDark ? "bg-white/40" : "bg-slate-900/30",
+                )}
+              />
+              {status.text}
+            </p>
+          )}
+          <h1 className="mt-5 max-w-2xl font-display text-[2.6rem] font-bold leading-[1.02] tracking-tight sm:text-6xl">
+            {settings.tagline || tenant.name}
+          </h1>
+          <p className={cn("mt-4 max-w-xl text-base sm:text-lg", heroDark ? "text-white/80" : "text-slate-700")}>
+            Taller mecánico{address ? ` en ${address.split(",").pop()?.replace(/\d{5}/, "").trim()}` : ""}.
+            {bookingOn ? " Pide cita online en un minuto y te avisamos en cuanto tu coche esté listo." : ""}
+          </p>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            {actions.booking && (
+              <Button asChild size="lg" className="h-12 shadow-sm">
+                <a href="#cita">
+                  <CalendarCheck strokeWidth={1.75} />
+                  Pedir cita
+                </a>
+              </Button>
+            )}
+            {actions.phone && (
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className={heroOutline}
+              >
+                <a href={`tel:${phone!.replace(/\s/g, "")}`}>
+                  <Phone strokeWidth={1.75} />
+                  Llamar al {phone}
+                </a>
+              </Button>
+            )}
+            {actions.whatsapp && (
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className={heroOutline}
+              >
+                <a href={waLink} target="_blank" rel="noreferrer">
+                  <MessageCircle strokeWidth={1.75} />
+                  WhatsApp
+                </a>
+              </Button>
+            )}
+          </div>
+        </div>
+        {/* Road marking: the one decorative element of the page */}
+        <div
+          aria-hidden="true"
+          className="h-1.5 w-full bg-[repeating-linear-gradient(90deg,var(--brand-sky)_0_48px,transparent_48px_88px)] opacity-80"
+        />
+      </section>
+
+      <main className="mx-auto max-w-5xl px-5">
+        {/* Services */}
+        {show.services && webServices.length > 0 && (
+          <section id="servicios" className="scroll-mt-20 py-14">
+            <SectionTitle
+              title="Servicios"
+              text={
+                show.prices
+                  ? "Precios orientativos con IVA. Te damos el presupuesto cerrado antes de empezar."
+                  : "Pregúntanos por el precio: te damos presupuesto antes de empezar."
+              }
+            />
+            <ul className="mt-6 divide-y divide-border border-y border-border">
+              {webServices.map((s) => {
+                const ws = serviceWebSettings(settings, s);
+                const price = show.prices
+                  ? servicePriceLabel(s, ws.priceMode, tenant.currency)
+                  : null;
+                return (
+                  <li key={s.id} className="flex items-baseline justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground">{s.name}</p>
+                      {ws.description && (
+                        <p className="mt-0.5 text-sm text-muted-foreground">{ws.description}</p>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-right font-display text-lg font-bold tabular-nums text-foreground">
+                      {price ?? (
+                        <span className="font-sans text-sm font-medium text-muted-foreground">
+                          Consúltanos
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Booking */}
+        {bookingOn && (
+          <section id="cita" className="scroll-mt-20 py-6">
+            <div className="rounded-2xl bg-brand-soft p-1.5">
+              <div className="rounded-xl border border-border bg-card p-5 sm:p-8">
+                <BookingForm
+                  tenant={tenant}
+                  services={webServices.length ? webServices : allServices}
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Reviews */}
+        {show.reviews && <Reviews tenant={tenant} />}
+
+        {/* Where + hours */}
+        {(show.address || show.hours) && (
+          <section id="donde" className="scroll-mt-20 py-14">
+            <SectionTitle title="Dónde estamos" />
+            <div className="mt-6 grid gap-6 md:grid-cols-5">
+              {show.address && address && (
+                <div className="overflow-hidden rounded-xl border border-border md:col-span-3">
+                  <iframe
+                    title={`Ubicación de ${tenant.name}`}
+                    src={`https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    className="h-60 w-full border-0 md:h-full md:min-h-72"
+                  />
+                </div>
+              )}
+              <div className={cn("space-y-5", show.address && address ? "md:col-span-2" : "md:col-span-5")}>
+                {show.address && address && (
+                  <div>
+                    <p className="flex items-start gap-2 text-foreground">
+                      <MapPin strokeWidth={1.5} className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      {address}
+                    </p>
+                    <a
+                      href={`https://www.google.com/maps?q=${encodeURIComponent(address)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                    >
+                      <Navigation strokeWidth={1.5} className="h-4 w-4" />
+                      Cómo llegar
+                    </a>
+                  </div>
+                )}
+                {show.hours && tenant.businessHours?.length === 7 && (
+                  <HoursTable hours={tenant.businessHours} />
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* About */}
+        {settings.about && (
+          <section className="border-t border-border py-14">
+            <SectionTitle title={`Sobre ${tenant.name}`} />
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground">
+              {settings.about}
+            </p>
+          </section>
+        )}
+      </main>
+
+      <footer className="border-t border-border bg-background-subtle">
+        <div className="mx-auto flex max-w-5xl flex-col gap-3 px-5 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-medium text-foreground">{tenant.name}</p>
+            <p className="mt-0.5">
+              {[show.phone ? phone : null, tenant.email].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-xs">Web hecha con EasyTaller</span>
+            {IS_DEMO && (
+              <Link to="/app" className="text-xs font-medium text-primary hover:underline">
+                Acceso taller
+              </Link>
+            )}
+          </div>
+        </div>
+      </footer>
+
+      {/* Mobile action bar */}
+      {(actions.booking || actions.phone || actions.whatsapp) && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur md:hidden">
+          <div className="flex gap-2">
+            {actions.phone && (
+              <Button asChild variant="outline" className="h-11 flex-1">
+                <a href={`tel:${phone!.replace(/\s/g, "")}`} aria-label="Llamar">
+                  <Phone strokeWidth={1.75} />
+                  Llamar
+                </a>
+              </Button>
+            )}
+            {actions.whatsapp && (
+              <Button asChild variant="outline" className="h-11 flex-1">
+                <a href={waLink} target="_blank" rel="noreferrer">
+                  <MessageCircle strokeWidth={1.75} />
+                  WhatsApp
+                </a>
+              </Button>
+            )}
+            {actions.booking && (
+              <Button asChild className="h-11 flex-[1.4]">
+                <a href="#cita">
+                  <CalendarCheck strokeWidth={1.75} />
+                  Pedir cita
+                </a>
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionTitle({ title, text }: { title: string; text?: string }) {
+  return (
+    <div>
+      <h2 className="font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+        {title}
+      </h2>
+      {text && <p className="mt-2 max-w-xl text-sm text-muted-foreground">{text}</p>}
+    </div>
+  );
+}
+
+function HoursTable({ hours }: { hours: BusinessDay[] }) {
+  const today = todayIndex();
+  return (
+    <div>
+      <p className="flex items-center gap-2 font-medium text-foreground">
+        <Clock strokeWidth={1.5} className="h-4 w-4 text-primary" />
+        Horario
+      </p>
+      <ul className="mt-2 space-y-1 text-sm">
+        {hours.map((day, i) => (
+          <li
+            key={i}
+            className={cn(
+              "flex justify-between gap-4 rounded-md px-2 py-1",
+              i === today ? "bg-brand-soft font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <span>{DAY_LABELS[i]}</span>
+            <span className="tabular-nums">{day.open ? `${day.from} – ${day.to}` : "Cerrado"}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Reviews({ tenant }: { tenant: Tenant }) {
+  const reviews = useMemo(() => {
+    const byId = new Map(customersRepo.list(tenant.id).map((c) => [c.id, c]));
+    return listReviews(tenant.id)
+      .filter((r) => r.comment && r.rating >= 4)
+      .slice(0, 3)
+      .map((r) => {
+        const name = byId.get(r.customerId)?.name ?? "Cliente";
+        const [first, last] = name.split(" ");
+        return { ...r, author: last ? `${first} ${last[0]}.` : first };
+      });
+  }, [tenant.id]);
+  const all = useMemo(() => listReviews(tenant.id), [tenant.id]);
+  if (reviews.length === 0) return null;
+  const avg = all.reduce((s, r) => s + r.rating, 0) / all.length;
+
+  return (
+    <section id="opiniones" className="scroll-mt-20 py-14">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <SectionTitle title="Opiniones" />
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Stars value={avg} />
+          <span className="font-medium text-foreground">{avg.toFixed(1).replace(".", ",")}</span>
+          de {all.length} valoraciones
+        </p>
+      </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        {reviews.map((r) => (
+          <figure key={r.id} className="rounded-xl border border-border p-5">
+            <Stars value={r.rating} />
+            <blockquote className="mt-3 text-foreground">{r.comment}</blockquote>
+            <figcaption className="mt-3 text-sm text-muted-foreground">{r.author}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Stars({ value }: { value: number }) {
+  return (
+    <span className="inline-flex gap-0.5 text-[#f5a524]" aria-label={`${value.toFixed(1)} de 5`}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star
+          key={i}
+          className={cn("h-4 w-4", i < Math.round(value) ? "fill-current" : "opacity-30")}
+          strokeWidth={0}
+        />
+      ))}
+    </span>
+  );
+}
+
+// ---- booking --------------------------------------------------------------------
+
+function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[] }) {
   const [done, setDone] = useState(false);
   const [step, setStep] = useState(0);
 
@@ -102,10 +557,6 @@ function BookingFlow({ tenant }: { tenant: Tenant }) {
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const accentStyle = {
-    ["--brand-accent" as string]: tenant.accentColor,
-  } as React.CSSProperties;
 
   const toggleService = (id: string) => {
     setUnsure(false);
@@ -151,7 +602,6 @@ function BookingFlow({ tenant }: { tenant: Tenant }) {
   };
 
   const submit = () => {
-    // Re-validate the required steps before sending.
     for (let s = 0; s < 4; s++) {
       if (!validateStep(s)) {
         setStep(s);
@@ -173,149 +623,115 @@ function BookingFlow({ tenant }: { tenant: Tenant }) {
     setDone(true);
   };
 
-  return (
-    <div className="min-h-screen bg-background-subtle" style={accentStyle}>
-      {/* Branding */}
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-5 py-4">
-          <Logo className="text-base" logoUrl={tenant.logoUrl} />
-          <span className="truncate text-sm font-medium text-foreground">
-            {tenant.name}
-          </span>
+  if (done) {
+    return (
+      <div className="py-6 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--success)_14%,transparent)] text-[var(--success)]">
+          <Check strokeWidth={2} className="h-6 w-6" />
         </div>
-      </header>
+        <h2 className="mt-4 font-display text-2xl font-bold tracking-tight text-foreground">
+          Solicitud enviada
+        </h2>
+        <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+          {tenant.name} ha recibido tu petición y te confirmará la cita lo antes posible.
+        </p>
+      </div>
+    );
+  }
 
-      <main className="mx-auto max-w-lg px-5 py-6">
-        {done ? (
-          <Confirmation tenant={tenant} />
+  return (
+    <div>
+      <h2 className="font-display text-3xl font-bold tracking-tight text-foreground">
+        Pide cita
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Sin llamadas: elige qué necesitas y cuándo te va bien.
+      </p>
+
+      <Progress step={step} />
+
+      <div className="mt-5">
+        {step === 0 && (
+          <StepServices
+            services={services}
+            serviceIds={serviceIds}
+            unsure={unsure}
+            onToggle={toggleService}
+            onUnsure={chooseUnsure}
+            error={errors.services}
+          />
+        )}
+        {step === 1 && (
+          <StepVehicle
+            plate={plate}
+            make={make}
+            model={model}
+            setPlate={setPlate}
+            setMake={setMake}
+            setModel={setModel}
+            error={errors.plate}
+          />
+        )}
+        {step === 2 && (
+          <StepDate
+            tenant={tenant}
+            date={date}
+            time={time}
+            setDate={setDate}
+            setTime={setTime}
+            errors={errors}
+          />
+        )}
+        {step === 3 && (
+          <StepDetails
+            name={name}
+            phone={phone}
+            email={email}
+            notes={notes}
+            setName={setName}
+            setPhone={setPhone}
+            setEmail={setEmail}
+            setNotes={setNotes}
+            errors={errors}
+          />
+        )}
+        {step === 4 && (
+          <StepSummary
+            tenant={tenant}
+            services={services}
+            serviceIds={serviceIds}
+            unsure={unsure}
+            plate={plate}
+            make={make}
+            model={model}
+            date={date}
+            time={time}
+            name={name}
+            phone={phone}
+            email={email}
+            notes={notes}
+          />
+        )}
+      </div>
+
+      <div className="mt-6 flex items-center gap-3">
+        {step > 0 && (
+          <Button variant="outline" className="h-11 flex-1" onClick={goBack}>
+            <ArrowLeft strokeWidth={1.5} className="h-4 w-4" />
+            Atrás
+          </Button>
+        )}
+        {step < STEPS.length - 1 ? (
+          <Button className="h-11 flex-1" onClick={goNext}>
+            Siguiente
+            <ArrowRight strokeWidth={1.5} className="h-4 w-4" />
+          </Button>
         ) : (
-          <>
-            <ShopInfo tenant={tenant} />
-            <ShopMap tenant={tenant} />
-
-            {isModuleEnabled(tenant, "reserva_online") ? (
-            <div className="mt-6 rounded-xl border border-border bg-card p-5 sm:p-6">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar strokeWidth={1.5} className="h-4 w-4" />
-                <span className="text-xs font-medium">Pedir cita online</span>
-              </div>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
-                Reserva tu cita
-              </h1>
-
-              <Progress step={step} />
-
-              <div className="mt-5">
-                {step === 0 && (
-                  <StepServices
-                    services={services}
-                    serviceIds={serviceIds}
-                    unsure={unsure}
-                    onToggle={toggleService}
-                    onUnsure={chooseUnsure}
-                    error={errors.services}
-                  />
-                )}
-                {step === 1 && (
-                  <StepVehicle
-                    plate={plate}
-                    make={make}
-                    model={model}
-                    setPlate={setPlate}
-                    setMake={setMake}
-                    setModel={setModel}
-                    error={errors.plate}
-                  />
-                )}
-                {step === 2 && (
-                  <StepDate
-                    tenant={tenant}
-                    date={date}
-                    time={time}
-                    setDate={setDate}
-                    setTime={setTime}
-                    errors={errors}
-                  />
-                )}
-                {step === 3 && (
-                  <StepDetails
-                    name={name}
-                    phone={phone}
-                    email={email}
-                    notes={notes}
-                    setName={setName}
-                    setPhone={setPhone}
-                    setEmail={setEmail}
-                    setNotes={setNotes}
-                    errors={errors}
-                  />
-                )}
-                {step === 4 && (
-                  <StepSummary
-                    tenant={tenant}
-                    services={services}
-                    serviceIds={serviceIds}
-                    unsure={unsure}
-                    plate={plate}
-                    make={make}
-                    model={model}
-                    date={date}
-                    time={time}
-                    name={name}
-                    phone={phone}
-                    email={email}
-                    notes={notes}
-                  />
-                )}
-              </div>
-
-              {/* Navigation */}
-              <div className="mt-6 flex items-center gap-3">
-                {step > 0 && (
-                  <Button variant="outline" className="flex-1" onClick={goBack}>
-                    <ArrowLeft strokeWidth={1.5} className="h-4 w-4" />
-                    Atrás
-                  </Button>
-                )}
-                {step < STEPS.length - 1 ? (
-                  <Button className="flex-1" onClick={goNext}>
-                    Siguiente
-                    <ArrowRight strokeWidth={1.5} className="h-4 w-4" />
-                  </Button>
-                ) : (
-                  <Button className="flex-1" onClick={submit}>
-                    Solicitar cita
-                  </Button>
-                )}
-              </div>
-            </div>
-            ) : (
-              <div className="mt-6 rounded-xl border border-border bg-card p-5 sm:p-6 text-center">
-                <Calendar
-                  strokeWidth={1.5}
-                  className="mx-auto mb-2 h-6 w-6 text-muted-foreground"
-                />
-                <p className="text-sm font-medium text-foreground">
-                  Reservas online no disponibles
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Este taller no acepta citas online por el momento. Puedes
-                  contactar directamente con los datos de arriba.
-                </p>
-              </div>
-            )}
-          </>
+          <Button className="h-11 flex-1" onClick={submit}>
+            Enviar solicitud
+          </Button>
         )}
-      </main>
-
-      <footer className="mx-auto flex max-w-lg flex-wrap items-center justify-between gap-2 px-5 pb-8 text-xs text-muted-foreground">
-        <span>© {new Date().getFullYear()} {tenant.name}</span>
-        {IS_DEMO && (
-          <Link to="/app" className="font-medium text-primary hover:underline">
-            Acceso taller →
-          </Link>
-        )}
-      </footer>
+      </div>
     </div>
   );
 }
@@ -329,7 +745,7 @@ function Progress({ step }: { step: number }) {
             key={i}
             className={cn(
               "h-1 flex-1 rounded-full transition-colors",
-              i <= step ? "bg-foreground" : "bg-border",
+              i <= step ? "bg-primary" : "bg-border",
             )}
           />
         ))}
@@ -377,7 +793,7 @@ function StepServices({
               className={cn(
                 "rounded-md border px-3 py-1.5 text-sm transition-colors",
                 active
-                  ? "border-foreground bg-foreground text-background"
+                  ? "border-primary bg-primary text-primary-foreground"
                   : "border-border text-muted-foreground hover:border-border-strong",
               )}
             >
@@ -391,7 +807,7 @@ function StepServices({
           className={cn(
             "rounded-md border px-3 py-1.5 text-sm transition-colors",
             unsure
-              ? "border-foreground bg-foreground text-background"
+              ? "border-primary bg-primary text-primary-foreground"
               : "border-dashed border-border text-muted-foreground hover:border-border-strong",
           )}
         >
@@ -655,81 +1071,6 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-4 px-3 py-2.5">
       <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
       <dd className="text-right text-sm text-foreground">{value}</dd>
-    </div>
-  );
-}
-
-function ShopInfo({ tenant }: { tenant: Tenant }) {
-  const location = tenant.locations[0];
-  const address = location?.address;
-  const phone = tenant.phone ?? location?.phone;
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <h2 className="text-base font-semibold text-foreground">{tenant.name}</h2>
-      <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-        {address && (
-          <p className="flex items-center gap-2">
-            <MapPin strokeWidth={1.5} className="h-4 w-4 shrink-0" />
-            {address}
-          </p>
-        )}
-        {phone && (
-          <p className="flex items-center gap-2">
-            <Phone strokeWidth={1.5} className="h-4 w-4 shrink-0" />
-            {phone}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Keyless Google Maps embed of the shop location, persistent across steps.
-// Hidden gracefully when the tenant has no address configured.
-function ShopMap({ tenant }: { tenant: Tenant }) {
-  const address = tenant.locations[0]?.address;
-  if (!address) return null;
-
-  const query = encodeURIComponent(address);
-  const embedSrc = `https://www.google.com/maps?q=${query}&output=embed`;
-  const directionsUrl = `https://www.google.com/maps?q=${query}`;
-
-  return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
-      <iframe
-        title={`Ubicación de ${tenant.name}`}
-        src={embedSrc}
-        loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
-        className="h-44 w-full border-0"
-      />
-      <a
-        href={directionsUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="flex items-center justify-center gap-2 border-t border-border px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-background-muted"
-      >
-        <Navigation strokeWidth={1.5} className="h-4 w-4" />
-        Cómo llegar
-      </a>
-    </div>
-  );
-}
-
-function Confirmation({ tenant }: { tenant: Tenant }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-8 text-center">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border text-[var(--success)]">
-        <Check strokeWidth={1.5} className="h-6 w-6" />
-      </div>
-      <h1 className="mt-4 text-xl font-semibold tracking-tight text-foreground">
-        Hemos recibido tu solicitud
-      </h1>
-      <p className="mx-auto mt-2 max-w-xs text-sm text-muted-foreground">
-        {tenant.name} revisará tu petición y te confirmará la cita lo antes
-        posible. Gracias.
-      </p>
     </div>
   );
 }
