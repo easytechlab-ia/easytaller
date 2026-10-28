@@ -1,10 +1,10 @@
-// Talleo — editor de presupuestos dentro de la ficha de orden. Permite añadir
+// EasyTaller — editor de presupuestos dentro de la ficha de orden. Permite añadir
 // líneas desde el catálogo (servicios/repuestos) o personalizadas, editarlas,
 // eliminarlas, ver totales en vivo con el IVA del taller y enviar el
 // presupuesto al cliente (simulado). Todo pasa por src/lib/quotes.ts.
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Send, ShieldCheck } from "lucide-react";
+import { Plus, Pencil, Trash2, Send, ShieldCheck, Printer, BellRing } from "lucide-react";
 import { DataCard } from "@/components/base/DataCard";
 import { StatusBadge } from "@/components/base/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { partsRepo, servicesRepo } from "@/lib/db";
+import { customersRepo, partsRepo, servicesRepo, vehiclesRepo } from "@/lib/db";
+import { QuotePrintDialog } from "@/components/app/QuoteDocument";
+import { QuoteWhatsAppDialog } from "@/components/app/QuoteWhatsAppDialog";
 import {
   addQuoteItem,
   lineAmount,
@@ -34,6 +36,7 @@ import {
   sendQuote,
   warrantyLabel,
   type QuoteItemInput,
+  quoteStage,
 } from "@/lib/quotes";
 import { quoteTotals } from "@/lib/orders";
 import { formatCurrencyCents } from "@/lib/format";
@@ -56,6 +59,12 @@ export function QuoteEditor({
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<QuoteItem | null>(null);
+  const [waOpen, setWaOpen] = useState(false);
+  const [waReminder, setWaReminder] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const customer = customersRepo.getById(tenant.id, order.customerId);
+  const vehicle = vehiclesRepo.getById(tenant.id, order.vehicleId);
+  const stage = quoteStage(order);
 
   const totals = quoteTotals(order.items, tenant.taxRate);
   const summary = quoteSummary(order.items);
@@ -94,8 +103,15 @@ export function QuoteEditor({
       return;
     }
     sendQuote(tenant, order);
-    toast.success("Presupuesto enviado al cliente");
     onSaved();
+    // Open WhatsApp with the message and the link to approve it.
+    setWaReminder(false);
+    setWaOpen(true);
+  };
+
+  const handleRemind = () => {
+    setWaReminder(true);
+    setWaOpen(true);
   };
 
   return (
@@ -201,13 +217,47 @@ export function QuoteEditor({
             {summary.rejected} rech.
           </span>
         </p>
-        <Button size="sm" onClick={handleSend} disabled={order.items.length === 0}>
-          <Send strokeWidth={1.5} />
-          {order.status === "presupuesto_enviado"
-            ? "Reenviar presupuesto"
-            : "Enviar presupuesto"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPrintOpen(true)}
+            disabled={order.items.length === 0}
+          >
+            <Printer strokeWidth={1.5} />
+            PDF
+          </Button>
+          {stage === "sent" ? (
+            <Button size="sm" onClick={handleRemind}>
+              <BellRing strokeWidth={1.5} />
+              Recordar por WhatsApp
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleSend} disabled={order.items.length === 0}>
+              <Send strokeWidth={1.5} />
+              {order.quoteApproval ? "Enviar cambios" : "Enviar presupuesto"}
+            </Button>
+          )}
+        </div>
       </div>
+
+      <QuoteWhatsAppDialog
+        open={waOpen}
+        onOpenChange={setWaOpen}
+        order={order}
+        tenant={tenant}
+        customer={customer}
+        vehicle={vehicle}
+        reminder={waReminder}
+      />
+      <QuotePrintDialog
+        open={printOpen}
+        onOpenChange={setPrintOpen}
+        order={order}
+        tenant={tenant}
+        customer={customer}
+        vehicle={vehicle}
+      />
 
       <QuoteItemDialog
         key={editing?.id ?? "new"}

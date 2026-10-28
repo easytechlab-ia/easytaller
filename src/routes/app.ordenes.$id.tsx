@@ -64,6 +64,8 @@ import { ReminderFormDialog } from "@/components/app/ReminderFormDialog";
 import {
   generateInvoiceFromOrder,
   getInvoiceByWorkOrderId,
+  BILLING_STAGE_LABELS,
+  billingStage,
 } from "@/lib/invoices";
 import { compressImage } from "@/lib/image";
 import { formatDateTime } from "@/lib/format";
@@ -539,7 +541,7 @@ function BillingCard({
       toast.error("No hay líneas aprobadas para facturar.");
       return;
     }
-    toast.success(`Factura ${created.number} generada`);
+    toast.success("Datos para facturar listos");
     onSaved();
   };
 
@@ -549,16 +551,18 @@ function BillingCard({
     <DataCard title="Facturación">
       {invoice ? (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-sm font-medium text-foreground">
-              {invoice.number}
+              Ref. {invoice.number}
             </span>
-            <StatusBadge status={invoice.status} />
+            <span className="text-xs font-medium text-muted-foreground">
+              {BILLING_STAGE_LABELS[billingStage(invoice)]}
+            </span>
           </div>
           <Button asChild variant="outline" size="sm" className="w-full">
             <Link to="/app/facturacion/$id" params={{ id: invoice.id }}>
               <Receipt strokeWidth={1.5} />
-              Ver factura
+              Ver datos para facturar
             </Link>
           </Button>
         </div>
@@ -566,12 +570,12 @@ function BillingCard({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {approvedCount > 0
-              ? `${approvedCount} línea(s) aprobada(s) lista(s) para facturar.`
+              ? `${approvedCount} ${approvedCount === 1 ? "línea aprobada" : "líneas aprobadas"}. Prepara los datos para que tu gestoría haga la factura.`
               : "No hay líneas aprobadas todavía."}
           </p>
           <Button size="sm" className="w-full" onClick={generate}>
             <Receipt strokeWidth={1.5} />
-            Generar factura
+            Preparar datos para facturar
           </Button>
         </div>
       )}

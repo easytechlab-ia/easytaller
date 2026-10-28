@@ -41,3 +41,32 @@ export function readyMessage(opts: {
   lines.push("¡Te esperamos!");
   return lines.join("\n\n");
 }
+
+/** Message to send a quote: total and link to review and approve it. */
+export function quoteMessage(opts: {
+  customerName?: string;
+  vehicleLabel?: string;
+  plate?: string;
+  tenantName: string;
+  total: string;
+  link: string;
+  reminder?: boolean;
+}): string {
+  const firstName = opts.customerName?.split(" ")[0];
+  const hello = firstName ? `¡Hola ${firstName}!` : "¡Hola!";
+  const car = opts.vehicleLabel
+    ? `tu ${opts.vehicleLabel}${opts.plate ? ` (${opts.plate})` : ""}`
+    : "tu coche";
+  if (opts.reminder) {
+    return [
+      `${hello} Te escribimos de ${opts.tenantName}. Tienes pendiente el presupuesto de ${car} (${opts.total} IVA incluido).`,
+      `Lo puedes revisar y aprobar aquí: ${opts.link}`,
+      "Si tienes cualquier duda, respóndenos a este mensaje y te llamamos.",
+    ].join("\n\n");
+  }
+  return [
+    `${hello} Te escribimos de ${opts.tenantName}. Ya tienes el presupuesto de ${car}: ${opts.total} IVA incluido.`,
+    `Puedes verlo y aprobarlo aquí, línea por línea: ${opts.link}`,
+    "Cualquier duda, respóndenos a este mensaje.",
+  ].join("\n\n");
+}

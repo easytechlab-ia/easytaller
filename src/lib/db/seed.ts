@@ -42,7 +42,7 @@ import { DEMO_TENANT_ID, DEMO_TENANT_SLUG, IS_DEMO } from "@/lib/mode";
 const SEED_FLAG = "seeded";
 // Bump when the seed shape changes to force a clean reseed of the demo. The mode
 // is part of the version so switching demo ⇄ saas reseeds too.
-const SEED_VERSION = `14-${IS_DEMO ? "demo" : "saas"}`;
+const SEED_VERSION = `15-${IS_DEMO ? "demo" : "saas"}`;
 
 // Tiny base64 placeholder images (kept small to respect the ~5MB quota).
 const PHOTO_A =
@@ -166,6 +166,8 @@ interface CustomerSeed {
   name: string;
   phone: string;
   email: string;
+  taxId?: string; // company / self-employed customers
+  address?: string;
 }
 
 interface VehicleSeed {
@@ -196,6 +198,12 @@ interface OrderSeed {
   inspection?: Array<["ok" | "atencion" | "critico", string, string?]>;
   checkin?: { km: number; fuel: number; damage?: boolean };
   invoiceStatus?: Invoice["status"]; // delivered orders only
+  quoteSentDaysAgo?: number; // when the quote was sent (default: just before the answer)
+  // Where its billing data is: still to send to the gestoría, already sent, or
+  // invoiced in the shop's own program (default for seeded history).
+  billing?: "to_send" | "sent" | "invoiced";
+  paymentMethod?: Invoice["paymentMethod"];
+  ageDays?: number; // delivered orders: how long ago (default spreads them over years)
   review?: { rating: number; comment?: string };
   customerMessage?: string;
   // Optional richer chat thread (overrides the default messages). hAgo = hours
@@ -432,6 +440,8 @@ function seedTenant(ts: TenantSeed): void {
       name: c.name,
       phone: c.phone,
       email: c.email,
+      taxId: c.taxId,
+      address: c.address,
       createdAt: daysAgo(40 + i * 9),
     } as Omit<Customer, "id">),
   );
@@ -482,7 +492,7 @@ function seedTenant(ts: TenantSeed): void {
     // Delivered orders are spread across past months/years so the km trend and
     // the per-year spend breakdown show history; active orders stay recent.
     const delivered = spec.status === "entregado";
-    const ageDays = delivered ? 120 + i * 95 : 0;
+    const ageDays = delivered ? spec.ageDays ?? 120 + i * 95 : 0;
     const baseIso = delivered ? daysAgo(ageDays) : hoursAgo(50 - i * 2);
     const checkInIso = delivered ? daysAgo(ageDays) : hoursAgo(47 - i);
     // Delivery/invoice happen a few days after intake for delivered orders.
@@ -558,6 +568,12 @@ function seedTenant(ts: TenantSeed): void {
       quoteApproval: decided
         ? { signature: SIGNATURE, decidedAt: hoursAgo(30 - i) }
         : undefined,
+      quoteSentAt:
+        spec.quoteSentDaysAgo != null
+          ? daysAgo(spec.quoteSentDaysAgo)
+          : decided && items.length
+            ? hoursAgo(34 - i)
+            : undefined,
       estimatedReadyAt: daysFromNow((i % 3) + 1, 18),
       createdAt: baseIso,
       updatedAt: deliveredIso,
@@ -577,6 +593,9 @@ function seedTenant(ts: TenantSeed): void {
           tax,
           total,
           status: spec.invoiceStatus,
+          paymentMethod: spec.paymentMethod ?? "tarjeta",
+          paidAmount: spec.invoiceStatus === "paid" ? total : undefined,
+          ...billingSeed(spec.billing ?? "invoiced", deliveredIso),
           createdAt: deliveredIso,
         } as Omit<Invoice, "id">);
       }
@@ -640,6 +659,9 @@ function seedTenant(ts: TenantSeed): void {
         tax,
         total,
         status: "paid",
+        paymentMethod: "tarjeta",
+        paidAmount: total,
+        ...billingSeed("invoiced", deliveredIso),
         createdAt: deliveredIso,
       } as Omit<Invoice, "id">);
     });
@@ -776,9 +798,26 @@ function seedTenant(ts: TenantSeed): void {
 
 
 // Per-tenant sequential invoice number, scoped to the current year.
+let externalSeq = 140;
+
+/** Seeded billing state: sent to the gestoría and/or invoiced in their program. */
+function billingSeed(
+  stage: "to_send" | "sent" | "invoiced",
+  deliveredIso: string,
+): Partial<Invoice> {
+  if (stage === "to_send") return {};
+  const sentAt = new Date(new Date(deliveredIso).getTime() + 6 * 3_600_000).toISOString();
+  if (stage === "sent") return { sentAt };
+  externalSeq += 1;
+  return {
+    sentAt,
+    externalNumber: `${new Date(deliveredIso).getFullYear()}/${String(externalSeq).padStart(4, "0")}`,
+  };
+}
+
 function nextNumber(tenantId: string): string {
   const year = new Date().getFullYear();
-  const prefix = `F-${year}-`;
+  const prefix = `R-${year}-`;
   const existing = invoicesRepo.list(tenantId).filter((i) => i.number.startsWith(prefix));
   let max = 0;
   for (const inv of existing) {
@@ -842,7 +881,14 @@ const EASYTECH: TenantSeed = {
     { name: "Jordi Puig", phone: "615 987 321", email: "jordi.puig@email.demo" },
     { name: "Núria Vidal", phone: "699 112 233", email: "nuria.vidal@email.demo" },
     { name: "Marc Soler", phone: "627 445 889", email: "marc.soler@email.demo" },
-    { name: "Anna Martí", phone: "634 778 990", email: "anna.marti@email.demo" },
+    {
+      name: "Anna Martí",
+      phone: "634 778 990",
+      email: "anna.marti@email.demo",
+      // Self-employed: wants the invoice with her NIF (fictional data).
+      taxId: "00000000T",
+      address: "C/ de Pujades 77, 08005 Barcelona",
+    },
     { name: "Pau Roca", phone: "644 210 365", email: "pau.roca@email.demo" },
     { name: "Carla Serra", phone: "655 908 412", email: "carla.serra@email.demo" },
   ],
@@ -869,11 +915,18 @@ const EASYTECH: TenantSeed = {
       problem: "Testigo de motor encendido",
       checkin: { km: 112300, fuel: 35 },
       inspection: INSP_OK,
+      // Quote prepared but not sent yet ("Por enviar").
+      lines: [
+        { type: "labor", description: "Diagnosis electrónica", qty: 1, unitPrice: 45 },
+        { type: "part", description: "Sonda lambda", qty: 1, unitPrice: 85, warrantyMonths: 12 },
+        { type: "labor", description: "Mano de obra — sustitución sonda", qty: 1, unitPrice: 45 },
+      ],
     },
     {
       vehicleIdx: 2,
       status: "presupuesto_enviado",
       problem: "Revisión de frenos completa",
+      quoteSentDaysAgo: 3, // waiting 3 days → "conviene recordarlo"
       checkin: { km: 54100, fuel: 80 },
       inspection: INSP_MIXED,
       thread: [
@@ -925,6 +978,8 @@ const EASYTECH: TenantSeed = {
         { type: "labor", description: "Mano de obra — revisión", qty: 2, unitPrice: 45 },
         { type: "part", description: "Aceite sintético 5W30 (1L)", qty: 4, unitPrice: 10 },
         { type: "part", description: "Filtro de aceite", qty: 1, unitPrice: 12 },
+        // Customer said no to this one → "Aceptado en parte".
+        { type: "part", description: "Escobillas limpiaparabrisas", qty: 1, unitPrice: 25, rejected: true },
       ],
     },
     {
@@ -974,6 +1029,46 @@ const EASYTECH: TenantSeed = {
       invoiceStatus: "paid",
       review: { rating: 4, comment: "Buen trato y sin esperas." },
       lines: [{ type: "labor", description: "Alineación y equilibrado", qty: 1, unitPrice: 70 }],
+    },
+    {
+      // Delivered yesterday: billing data still to send to the gestoría.
+      vehicleIdx: 4,
+      status: "entregado",
+      problem: "Cambio de neumáticos delanteros",
+      ageDays: 1,
+      invoiceStatus: "paid",
+      paymentMethod: "bizum",
+      billing: "to_send",
+      lines: [
+        { type: "part", description: "Neumático 205/55 R16", qty: 2, unitPrice: 78, warrantyMonths: 24 },
+        { type: "labor", description: "Montaje y equilibrado", qty: 2, unitPrice: 15 },
+      ],
+    },
+    {
+      // Delivered 4 days ago: sent to the gestoría, not invoiced yet.
+      vehicleIdx: 5,
+      status: "entregado",
+      problem: "Cambio de batería",
+      ageDays: 4,
+      invoiceStatus: "paid",
+      paymentMethod: "efectivo",
+      billing: "sent",
+      lines: [
+        { type: "part", description: "Batería 70Ah", qty: 1, unitPrice: 115, warrantyMonths: 24 },
+        { type: "labor", description: "Mano de obra — batería", qty: 1, unitPrice: 20 },
+      ],
+    },
+    {
+      // Quote the customer turned down: car returned without the repair.
+      vehicleIdx: 7,
+      status: "entregado",
+      problem: "Ruido en la suspensión trasera",
+      ageDays: 6,
+      checkin: { km: 64200, fuel: 50 },
+      lines: [
+        { type: "labor", description: "Mano de obra — suspensión", qty: 2, unitPrice: 45, rejected: true },
+        { type: "part", description: "Amortiguadores traseros (par)", qty: 1, unitPrice: 190, rejected: true, warrantyMonths: 24 },
+      ],
     },
   ],
   reminders: [

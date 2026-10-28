@@ -169,7 +169,7 @@ function HistoryItem({
               onClick={() => setInvoiceOpen(true)}
             >
               <ReceiptText strokeWidth={1.5} />
-              Ver / Imprimir factura
+              Ver resumen del trabajo
             </Button>
           )}
         </div>
@@ -228,13 +228,16 @@ function HistoryInvoiceDialog({
   const location =
     tenant.locations.find((l) => l.id === order.locationId) ??
     tenant.locations[0];
+  // Same history is shown in the shop panel and in the customer pages.
+  const inShop =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/app");
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-3">
-            <span>Factura {invoice.number}</span>
+            <span>{inShop ? "Datos para facturar" : "Resumen del trabajo"}</span>
             <Button
               variant="outline"
               size="sm"
@@ -252,6 +255,7 @@ function HistoryInvoiceDialog({
           vehicle={vehicle}
           location={location}
           printId="invoice-history"
+          variant={inShop ? "shop" : "customer"}
         />
       </DialogContent>
     </Dialog>

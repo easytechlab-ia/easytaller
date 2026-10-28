@@ -1,4 +1,4 @@
-// Talleo — quote (presupuesto) domain logic. Centralizes adding/editing/removing
+// EasyTaller — quote (presupuesto) domain logic. Centralizes adding/editing/removing
 // quote lines and the simulated "send quote to customer" flow. All persistence
 // goes through the repos; no component touches localStorage directly.
 
@@ -150,6 +150,7 @@ export function sendQuote(
   ];
   const updated = workOrdersRepo.update(tenant.id, current.id, {
     messages,
+    quoteSentAt: now,
     updatedAt: now,
   });
 
@@ -241,3 +242,49 @@ export function confirmQuoteApproval(
   return updated;
 }
 
+
+// ---- quote list ("Presupuestos") -------------------------------------------
+
+/**
+ * Where a quote is:
+ * - draft: has lines but hasn't been sent (or new lines were added after the
+ *   customer answered and it wasn't re-sent),
+ * - sent: waiting for the customer's answer,
+ * - approved / partial / rejected: the customer has answered every line.
+ */
+export type QuoteStage = "draft" | "sent" | "approved" | "partial" | "rejected";
+
+export const QUOTE_STAGE_LABELS: Record<QuoteStage, string> = {
+  draft: "Por enviar",
+  sent: "Esperando respuesta",
+  approved: "Aceptado",
+  partial: "Aceptado en parte",
+  rejected: "Rechazado",
+};
+
+/** When the quote was sent (older data: the last update while "enviado"). */
+export function quoteSentDate(order: WorkOrder): string | undefined {
+  if (order.quoteSentAt) return order.quoteSentAt;
+  if (order.status === "presupuesto_enviado") return order.updatedAt;
+  return undefined;
+}
+
+export function quoteStage(order: WorkOrder): QuoteStage | null {
+  if (order.items.length === 0) return null;
+  const s = quoteSummary(order.items);
+  if (s.pending > 0) {
+    const sentAt = quoteSentDate(order);
+    const answeredAt = order.quoteApproval?.decidedAt;
+    if (sentAt && (!answeredAt || sentAt > answeredAt)) return "sent";
+    return "draft";
+  }
+  if (s.approved > 0) return s.rejected > 0 ? "partial" : "approved";
+  return "rejected";
+}
+
+/** Whole days since an ISO date (0 = today). */
+export function daysSince(iso?: string, now = new Date()): number | undefined {
+  if (!iso) return undefined;
+  const ms = now.getTime() - new Date(iso).getTime();
+  return Math.max(0, Math.floor(ms / 86_400_000));
+}
