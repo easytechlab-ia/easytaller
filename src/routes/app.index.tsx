@@ -175,7 +175,7 @@ function AppDashboard() {
           cards.push({
             key: "stock",
             to: "/app/stock",
-            node: <StatCard label="Repuestos bajo stock" value={stats.lowStock} icon={Boxes} />,
+            node: <StatCard label="Recambios por pedir" value={stats.lowStock} icon={Boxes} />,
           });
         return (
           <div
