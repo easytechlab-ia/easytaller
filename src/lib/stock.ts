@@ -1,10 +1,10 @@
-// Talleo — stock / inventory domain logic. Extends the parts catalog with
+// EasyTaller — stock / inventory domain logic. Extends the parts catalog with
 // inventory: current units, minimum desired units and warehouse location.
 // Connects to the order flow (decrement on invoice) and the notification
 // center (low-stock alerts). All access goes through partsRepo; everything is
 // local & simulated.
 
-import type { Invoice, Part } from "@/types";
+import type { Invoice, Part, WorkOrder } from "@/types";
 import { partsRepo } from "@/lib/db";
 import { notify } from "@/lib/notifications";
 
@@ -95,4 +95,25 @@ export function decrementStockForInvoice(invoice: Invoice): void {
     }
     partsRepo.update(invoice.tenantId, part.id, patch);
   }
+}
+
+/**
+ * Take the approved parts of a repair out of stock. Runs when the car is marked
+ * "Listo"; `stockUsedAt` on the order makes sure it only happens once.
+ */
+export function deductStockForOrder(tenantId: string, order: WorkOrder): void {
+  if (order.stockUsedAt) return;
+  for (const item of order.items) {
+    if (item.type !== "part" || !item.partId || item.approval !== "approved") continue;
+    const part = partsRepo.getById(tenantId, item.partId);
+    if (!part || part.stockQty == null) continue; // not tracked
+    partsRepo.update(tenantId, part.id, {
+      stockQty: Math.max(0, part.stockQty - item.qty),
+    });
+  }
+}
+
+/** Parts at or below their minimum: what has to be ordered. */
+export function partsToOrder(tenantId: string): Part[] {
+  return listStock(tenantId).filter(isLowStock);
 }

@@ -73,9 +73,7 @@ export function canEdit(role: Role, module: AppModule): boolean {
 export type ToggleableModule =
   | "presupuestos"
   | "facturacion"
-  | "servicios"
   | "equipo"
-  | "stock"
   | "mensajes"
   | "agentes"
   | "recordatorios"
@@ -86,9 +84,7 @@ export type ToggleableModule =
 export const TOGGLEABLE_MODULES: ToggleableModule[] = [
   "presupuestos",
   "facturacion",
-  "servicios",
   "equipo",
-  "stock",
   "mensajes",
   "agentes",
   "recordatorios",
@@ -104,6 +100,9 @@ export const CORE_MODULES = [
   "vehiculos",
   "citas",
   "web",
+  // Services and parts feed the website, the agenda and every quote.
+  "servicios",
+  "stock",
   "configuracion",
 ] as const;
 
