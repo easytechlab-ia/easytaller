@@ -6,8 +6,8 @@
 // Configuración); the rest in the website settings. Everything is local.
 
 import { useMemo, useRef, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { Check, ExternalLink, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Check, ExternalLink, ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/base/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { servicesRepo, tenantsRepo } from "@/lib/db";
+import { formatCurrencyCents } from "@/lib/format";
 import { IS_DEMO } from "@/lib/mode";
 import { compressImage } from "@/lib/image";
 import { accentVars, isDark, readableText } from "@/lib/colors";
@@ -53,9 +54,7 @@ const DAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sába
 interface ServiceDraft extends WebsiteServiceSettings {
   id: string;
   name: string;
-  price: string; // edited as text
-  isNew?: boolean;
-  removed?: boolean;
+  price: number; // IVA included, from Servicios (read-only here)
 }
 
 function defaultHours(): BusinessDay[] {
@@ -97,7 +96,7 @@ function MyWebsitePage() {
       .map((s) => ({
         id: s.id,
         name: s.name,
-        price: String(s.basePrice ?? ""),
+        price: s.basePrice ?? 0,
         ...serviceWebSettings(initial, s),
       }));
   });
@@ -125,27 +124,7 @@ function MyWebsitePage() {
   const patchService = (id: string, patch: Partial<ServiceDraft>) =>
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
 
-  const addService = () =>
-    setServices((prev) => [
-      ...prev,
-      {
-        id: `new_${Date.now()}`,
-        name: "",
-        price: "",
-        showOnWeb: true,
-        priceMode: "from",
-        description: "",
-        isNew: true,
-      },
-    ]);
-
   const save = () => {
-    const visible = services.filter((s) => !s.removed);
-    if (visible.some((s) => !s.name.trim())) {
-      toast.error("Cada servicio necesita un nombre.");
-      return;
-    }
-
     // 1) Contact, address and hours live on the shop (shared with Configuración).
     tenantsRepo.update(tenant.id, {
       accentColor: accent,
@@ -159,26 +138,11 @@ function MyWebsitePage() {
       ),
     });
 
-    // 2) Services: create / update / remove from the catalogue.
+    // 2) How each service appears on the website (name and price live in
+    // Servicios).
     const serviceSettings: Record<string, WebsiteServiceSettings> = {};
     for (const s of services) {
-      const basePrice = Math.max(0, Math.round(Number(s.price.replace(",", ".")) || 0));
-      if (s.removed) {
-        if (!s.isNew) servicesRepo.remove(tenant.id, s.id);
-        continue;
-      }
-      let id = s.id;
-      if (s.isNew) {
-        id = servicesRepo.create(tenant.id, {
-          tenantId: tenant.id,
-          name: s.name.trim(),
-          basePrice,
-          estimatedMinutes: 60,
-        } as Omit<Service, "id">).id;
-      } else {
-        servicesRepo.update(tenant.id, s.id, { name: s.name.trim(), basePrice });
-      }
-      serviceSettings[id] = {
+      serviceSettings[s.id] = {
         showOnWeb: s.showOnWeb,
         priceMode: s.priceMode,
         description: s.description?.trim() ?? "",
@@ -200,18 +164,6 @@ function MyWebsitePage() {
     });
 
     refresh();
-    // New services now have real ids: reload the list from storage.
-    setServices(
-      servicesRepo
-        .list(tenant.id)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((svc) => ({
-          id: svc.id,
-          name: svc.name,
-          price: String(svc.basePrice ?? ""),
-          ...(serviceSettings[svc.id] ?? { showOnWeb: true, priceMode: "from" as PriceMode }),
-        })),
-    );
     toast.success("Web actualizada. Los cambios ya se ven en tu página.");
   };
 
@@ -435,98 +387,80 @@ function MyWebsitePage() {
         </Section>
 
         <Section
-          title="Servicios y precios"
-          description="Elige qué servicios aparecen y cómo se muestra el precio: «desde», exacto o sin precio."
+          title="Servicios en tu web"
+          description="Elige qué servicios aparecen y cómo se muestra su precio: «desde», exacto o sin precio."
         >
+          <p className="text-sm text-muted-foreground">
+            El nombre y el precio se cambian en{" "}
+            <Link to="/app/servicios" className="font-medium text-primary hover:underline">
+              Servicios
+            </Link>
+            .
+          </p>
           <div className="space-y-3">
-            {services
-              .filter((s) => !s.removed)
-              .map((s) => {
-                const preview = servicePriceLabel(
-                  { basePrice: Number(s.price) || 0 } as Service,
-                  s.priceMode,
-                  tenant.currency,
-                );
-                return (
-                  <div
-                    key={s.id}
-                    className={cn(
-                      "rounded-lg border border-border p-3 transition-opacity",
-                      !s.showOnWeb && "opacity-60",
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      <Switch
-                        className="mt-2"
-                        checked={s.showOnWeb}
-                        onCheckedChange={(v) => patchService(s.id, { showOnWeb: v })}
-                        aria-label={`Mostrar ${s.name} en la web`}
-                      />
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Input
-                          value={s.name}
-                          onChange={(e) => patchService(s.id, { name: e.target.value })}
-                          placeholder="Nombre del servicio"
-                          className="font-medium"
-                        />
-                        <Input
-                          value={s.description ?? ""}
-                          onChange={(e) => patchService(s.id, { description: e.target.value })}
-                          placeholder="Descripción corta (opcional)"
-                          maxLength={120}
-                        />
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Select
-                            value={s.priceMode}
-                            onValueChange={(v) => patchService(s.id, { priceMode: v as PriceMode })}
-                          >
-                            <SelectTrigger className="h-9 w-40">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(Object.keys(PRICE_MODE_LABELS) as PriceMode[]).map((m) => (
-                                <SelectItem key={m} value={m}>
-                                  {PRICE_MODE_LABELS[m]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {s.priceMode !== "hidden" && (
-                            <div className="relative">
-                              <Input
-                                inputMode="decimal"
-                                value={s.price}
-                                onChange={(e) => patchService(s.id, { price: e.target.value })}
-                                className="h-9 w-28 pr-7"
-                                aria-label="Precio"
-                              />
-                              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                                €
-                              </span>
-                            </div>
-                          )}
-                          <span className="text-xs text-muted-foreground">
-                            En la web: {s.showOnWeb ? (show.prices ? preview ?? "Consúltanos" : "sin precios") : "oculto"}
-                          </span>
-                        </div>
+            {services.length === 0 && (
+              <p className="text-sm text-muted-foreground">Aún no tienes servicios.</p>
+            )}
+            {services.map((s) => {
+              const preview = servicePriceLabel(
+                { basePrice: s.price } as Service,
+                s.priceMode,
+                tenant.currency,
+              );
+              return (
+                <div
+                  key={s.id}
+                  className={cn(
+                    "rounded-lg border border-border p-3 transition-opacity",
+                    !s.showOnWeb && "opacity-60",
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <Switch
+                      className="mt-0.5"
+                      checked={s.showOnWeb}
+                      onCheckedChange={(v) => patchService(s.id, { showOnWeb: v })}
+                      aria-label={`Mostrar ${s.name} en la web`}
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="font-medium text-foreground">{s.name}</p>
+                        <p className="text-sm tabular-nums text-muted-foreground">
+                          {formatCurrencyCents(s.price, tenant.currency)} IVA incl.
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => patchService(s.id, { removed: true })}
-                        className="mt-2 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-[var(--destructive)]"
-                        aria-label="Eliminar servicio"
-                      >
-                        <Trash2 strokeWidth={1.5} className="h-4 w-4" />
-                      </button>
+                      <Input
+                        value={s.description ?? ""}
+                        onChange={(e) => patchService(s.id, { description: e.target.value })}
+                        placeholder="Descripción corta (opcional)"
+                        maxLength={120}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                          value={s.priceMode}
+                          onValueChange={(v) => patchService(s.id, { priceMode: v as PriceMode })}
+                        >
+                          <SelectTrigger className="h-9 w-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(PRICE_MODE_LABELS) as PriceMode[]).map((m) => (
+                              <SelectItem key={m} value={m}>
+                                {PRICE_MODE_LABELS[m]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-xs text-muted-foreground">
+                          En la web: {s.showOnWeb ? (show.prices ? preview ?? "Consúltanos" : "sin precios") : "oculto"}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
           </div>
-          <Button variant="outline" onClick={addService}>
-            <Plus strokeWidth={1.5} />
-            Añadir servicio
-          </Button>
         </Section>
 
         <div className="flex justify-end pb-4">{actions}</div>
