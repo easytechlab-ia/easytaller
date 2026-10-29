@@ -968,7 +968,7 @@ const EASYTECH: TenantSeed = {
         { from: "shop", text: "Hemos recibido tu coche, te mantenemos informada.", hAgo: 46 },
         { from: "shop", text: "Ya tenemos el diagnóstico: hay que cambiar pastillas y discos delanteros. Te enviamos el presupuesto.", hAgo: 30 },
         { from: "customer", text: "Gracias. ¿El precio incluye IVA?", hAgo: 26 },
-        { from: "shop", text: "Sí, todos los importes del presupuesto ya llevan el IVA incluido.", hAgo: 25 },
+        { from: "shop", text: "Sí: en el presupuesto ves cada línea sin IVA y abajo el total con el IVA ya sumado.", hAgo: 25 },
         { from: "customer", text: "Perfecto. ¿Para cuándo estaría si lo apruebo hoy?", hAgo: 3, read: false },
       ],
       lines: [
