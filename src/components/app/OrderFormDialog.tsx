@@ -60,6 +60,7 @@ export function OrderFormDialog({
     model: "",
   });
 
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
 
   const customers = useMemo(
@@ -85,6 +86,7 @@ export function OrderFormDialog({
     setNewCustomer({ name: "", phone: "" });
     setCreatingVehicle(false);
     setNewVehicle({ plate: "", make: "", model: "" });
+    setConsent(false);
     setError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultCustomerId, defaultVehicleId]);
@@ -104,6 +106,10 @@ export function OrderFormDialog({
     sub: v.plate,
   }));
 
+  // Consent is asked once per customer; existing customers who gave it skip it.
+  const consentGiven =
+    !creatingCustomer && !!customers.find((c) => c.id === customerId)?.dataConsentAt;
+
   const startCreateCustomer = (query: string) => {
     setCreatingCustomer(true);
     setNewCustomer({ name: query, phone: "" });
@@ -120,6 +126,14 @@ export function OrderFormDialog({
 
   const submit = () => {
     setError("");
+    if (!consentGiven && !consent) {
+      setError("Marca que el cliente acepta el tratamiento de sus datos.");
+      return;
+    }
+    if (!problem.trim()) {
+      setError("Describe el problema o motivo de entrada.");
+      return;
+    }
 
     // Resolve customer
     let resolvedCustomer: Customer | undefined;
@@ -177,6 +191,16 @@ export function OrderFormDialog({
     if (!problem.trim()) {
       setError("Describe el problema o motivo de entrada.");
       return;
+    }
+    if (!consentGiven && !consent) {
+      setError("Marca que el cliente acepta el tratamiento de sus datos.");
+      return;
+    }
+
+    if (!resolvedCustomer.dataConsentAt) {
+      customersRepo.update(tenant.id, resolvedCustomer.id, {
+        dataConsentAt: new Date().toISOString(),
+      });
     }
 
     const order = createWorkOrder(tenant, {
@@ -347,6 +371,22 @@ export function OrderFormDialog({
               maxLength={600}
             />
           </div>
+
+          {/* Data consent (once per customer) */}
+          {!consentGiven && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-accent)]"
+              />
+              <span className="text-sm text-foreground">
+                El cliente acepta que guardemos sus datos para gestionar la reparación y avisarle
+                por WhatsApp. *
+              </span>
+            </label>
+          )}
 
           {error && (
             <p className="text-sm text-[var(--destructive)]">{error}</p>

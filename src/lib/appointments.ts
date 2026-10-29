@@ -31,6 +31,7 @@ export const APPOINTMENT_FLOW: AppointmentStatus[] = [
 ];
 
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
+  pendiente: "Pendiente de confirmar",
   programada: "Programada",
   confirmada: "Confirmada",
   en_taller: "En taller",
@@ -46,6 +47,8 @@ export function nextAppointmentStatuses(
   current: AppointmentStatus,
 ): AppointmentStatus[] {
   if (current === "completada" || current === "no_show") return [];
+  // Pending online requests are answered with the Confirmar / Proponer buttons.
+  if (current === "pendiente") return ["no_show"];
   const out: AppointmentStatus[] = [];
   const idx = APPOINTMENT_FLOW.indexOf(current);
   if (idx >= 0 && idx < APPOINTMENT_FLOW.length - 1) {
@@ -163,8 +166,11 @@ export function requestOnlineAppointment(
       name,
       phone,
       email: input.email?.trim() || undefined,
+      dataConsentAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     } as Omit<Customer, "id">);
+  } else if (!customer.dataConsentAt) {
+    customersRepo.update(tenant.id, customer.id, { dataConsentAt: new Date().toISOString() });
   }
 
   // Vehicle: create when a plate is given and it doesn't exist yet.
@@ -198,14 +204,14 @@ export function requestOnlineAppointment(
     vehicleId,
     serviceIds: input.serviceIds,
     scheduledAt: input.scheduledAt,
-    status: "programada",
+    status: "pendiente",
     source: "online",
     notes: input.notes?.trim() || undefined,
   } as Omit<Appointment, "id">);
 
   notify(tenant.id, {
     type: "cita",
-    title: "Nueva cita online",
+    title: "Nueva cita online: confírmala",
     body: `${name} — ${plate ? plate.toUpperCase() : "sin vehículo"} · ${formatDateTime(input.scheduledAt)}`,
     link: "/app/citas",
   });
@@ -226,6 +232,20 @@ export function updateAppointment(
     scheduledAt: input.scheduledAt,
     notes: input.notes?.trim() || undefined,
   });
+}
+
+/** The shop proposes another time: the request stays pending until the customer says yes. */
+export function proposeAppointmentTime(
+  tenantId: string,
+  appt: Appointment,
+  scheduledAt: string,
+): Appointment | undefined {
+  return appointmentsRepo.update(tenantId, appt.id, { scheduledAt, proposed: true });
+}
+
+/** Confirm a pending request (after the customer agreed, when a time was proposed). */
+export function confirmAppointment(tenantId: string, appt: Appointment): Appointment | undefined {
+  return appointmentsRepo.update(tenantId, appt.id, { status: "confirmada", proposed: false });
 }
 
 /** Change the appointment status (with a simulated notification). */

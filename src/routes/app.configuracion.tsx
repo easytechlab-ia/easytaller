@@ -140,6 +140,7 @@ function ConfigPage() {
     tenant?.diagnosisPrice ? String(tenant.diagnosisPrice).replace(".", ",") : "",
   );
   const [diagWaived, setDiagWaived] = useState(!!tenant?.diagnosisWaived);
+  const [validity, setValidity] = useState(String(tenant?.quoteValidityDays ?? 30));
   const [accentColor] = useState(tenant?.accentColor ?? "#1877d6");
   const [logoUrl, setLogoUrl] = useState<string | undefined>(tenant?.logoUrl);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(
@@ -200,6 +201,7 @@ function ConfigPage() {
       laborRate: hourly,
       diagnosisPrice: Math.max(0, Number(diag.replace(",", ".")) || 0) || undefined,
       diagnosisWaived: diagWaived,
+      quoteValidityDays: Math.max(1, Math.round(Number(validity) || 30)),
       accentColor,
       logoUrl,
       googleReviewUrl: googleReviewUrl.trim() || undefined,
@@ -328,6 +330,16 @@ function ConfigPage() {
             El diagnóstico entra solo como primera línea de cada presupuesto. Si el cliente no
             hace la reparación, es lo que paga.
           </p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Validez del presupuesto (días)">
+              <Input
+                type="number"
+                min={1}
+                value={validity}
+                onChange={(e) => setValidity(e.target.value)}
+              />
+            </Field>
+          </div>
         </Section>
 
         <Section title="Marca" description="Logotipo del taller.">

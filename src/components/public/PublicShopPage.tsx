@@ -556,6 +556,7 @@ function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[]
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
+  const [consent, setConsent] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const toggleService = (id: string) => {
@@ -608,6 +609,10 @@ function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[]
         return;
       }
     }
+    if (!consent) {
+      setErrors({ consent: "Necesitamos tu permiso para guardar tus datos y darte la cita." });
+      return;
+    }
     const scheduledAt = new Date(`${date}T${time}`).toISOString();
     requestOnlineAppointment(tenant, {
       name,
@@ -633,7 +638,8 @@ function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[]
           Solicitud enviada
         </h2>
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-          {tenant.name} ha recibido tu petición y te confirmará la cita lo antes posible.
+          {tenant.name} ha recibido tu petición. Te confirmamos la cita por WhatsApp lo antes
+          posible.
         </p>
       </div>
     );
@@ -710,6 +716,12 @@ function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[]
             phone={phone}
             email={email}
             notes={notes}
+            consent={consent}
+            setConsent={(v) => {
+              setConsent(v);
+              setErrors({});
+            }}
+            error={errors.consent}
           />
         )}
       </div>
@@ -1005,7 +1017,13 @@ function StepSummary({
   phone,
   email,
   notes,
+  consent,
+  setConsent,
+  error,
 }: {
+  consent: boolean;
+  setConsent: (v: boolean) => void;
+  error?: string;
   tenant: Tenant;
   services: Service[];
   serviceIds: string[];
@@ -1058,9 +1076,23 @@ function StepSummary({
         {email && <SummaryRow label="Email" value={email} />}
         {notes && <SummaryRow label="Descripción" value={notes} />}
       </dl>
+      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+          className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-accent)]"
+        />
+        <span className="text-sm text-foreground">
+          Acepto que {tenant.name} guarde mis datos para gestionar la cita y avisarme de mi coche.{" "}
+          <Link to="/privacidad" target="_blank" className="text-primary underline-offset-2 hover:underline">
+            Política de privacidad
+          </Link>
+        </span>
+      </label>
+      {error && <p className="text-sm text-[var(--destructive)]">{error}</p>}
       <p className="text-xs text-muted-foreground">
-        {tenant.name} revisará tu petición y te confirmará la cita lo antes
-        posible.
+        Tu cita queda pendiente hasta que {tenant.name} te la confirme por WhatsApp.
       </p>
     </div>
   );

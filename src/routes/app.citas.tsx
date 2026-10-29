@@ -14,12 +14,22 @@ import {
   Plus,
   Car,
   ArrowRight,
+  MessageCircle,
+  CalendarClock,
 } from "lucide-react";
 import { PageHeader } from "@/components/base/PageHeader";
 import { EmptyState } from "@/components/base/EmptyState";
 import { StatusBadge } from "@/components/base/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -34,12 +44,19 @@ import {
   APPOINTMENT_STATUS_LABELS,
   appointmentDuration,
   changeAppointmentStatus,
+  confirmAppointment,
   createOrderFromAppointment,
+  proposeAppointmentTime,
   formatDuration,
   listServiceLabels,
   nextAppointmentStatuses,
 } from "@/lib/appointments";
 import { formatTime } from "@/lib/format";
+import {
+  appointmentConfirmedMessage,
+  appointmentProposalMessage,
+  whatsappUrl,
+} from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 import type {
   Appointment,
@@ -79,6 +96,17 @@ function startOfWeek(key: string): string {
 
 const WEEKDAYS = ["L", "M", "X", "J", "V", "S", "D"];
 
+/** "jueves 30 de octubre a las 10:00" for WhatsApp messages. */
+function whenLabel(iso: string): string {
+  const d = new Date(iso);
+  const day = new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(d);
+  return `${day} a las ${formatTime(iso)}`;
+}
+
 function longDate(key: string): string {
   return new Intl.DateTimeFormat("es-ES", {
     weekday: "long",
@@ -103,6 +131,9 @@ function CitasPage() {
   const [version, setVersion] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Appointment | null>(null);
+  const [proposing, setProposing] = useState<Enriched | null>(null);
+  const [pDate, setPDate] = useState("");
+  const [pTime, setPTime] = useState("");
 
   const dayAppointments = useMemo<Enriched[]>(() => {
     if (!ready || !tenant) return [];
@@ -151,6 +182,53 @@ function CitasPage() {
 
   const changeStatus = (appt: Appointment, next: AppointmentStatus) => {
     changeAppointmentStatus(tenant, appt, next);
+    setVersion((v) => v + 1);
+  };
+
+  // Pending online request → confirm it and tell the customer by WhatsApp.
+  const confirm = (e: Enriched) => {
+    window.open(
+      whatsappUrl(
+        e.customer?.phone,
+        appointmentConfirmedMessage({
+          customerName: e.customer?.name,
+          tenantName: tenant.name,
+          when: whenLabel(e.appt.scheduledAt),
+          plate: e.vehicle?.plate,
+        }),
+      ),
+      "_blank",
+    );
+    confirmAppointment(tenant.id, e.appt);
+    toast.success("Cita confirmada");
+    setVersion((v) => v + 1);
+  };
+
+  const openPropose = (e: Enriched) => {
+    const d = new Date(e.appt.scheduledAt);
+    setPDate(toKey(d));
+    setPTime(formatTime(e.appt.scheduledAt));
+    setProposing(e);
+  };
+
+  const sendProposal = () => {
+    if (!proposing || !pDate || !pTime) return;
+    const iso = new Date(`${pDate}T${pTime}`).toISOString();
+    window.open(
+      whatsappUrl(
+        proposing.customer?.phone,
+        appointmentProposalMessage({
+          customerName: proposing.customer?.name,
+          tenantName: tenant.name,
+          when: whenLabel(iso),
+        }),
+      ),
+      "_blank",
+    );
+    proposeAppointmentTime(tenant.id, proposing.appt, iso);
+    setProposing(null);
+    setDayKey(pDate);
+    toast.success("Propuesta enviada. Cuando el cliente diga que sí, pulsa Confirmar.");
     setVersion((v) => v + 1);
   };
 
@@ -286,6 +364,8 @@ function CitasPage() {
               key={e.appt.id}
               enriched={e}
               onEdit={() => openEdit(e.appt)}
+              onConfirm={() => confirm(e)}
+              onPropose={() => openPropose(e)}
               onChangeStatus={(s) => changeStatus(e.appt, s)}
               onReceive={() => receiveCar(e.appt)}
               onOpenOrder={() =>
@@ -308,6 +388,38 @@ function CitasPage() {
         defaultDate={dayKey}
         onSaved={() => setVersion((v) => v + 1)}
       />
+
+      {/* Propose another time */}
+      <Dialog open={!!proposing} onOpenChange={(o) => !o && setProposing(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Proponer otra hora</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Se abrirá WhatsApp con la propuesta para {proposing?.customer?.name ?? "el cliente"}.
+            La cita sigue pendiente hasta que te diga que sí.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="p-date">Día</Label>
+              <Input id="p-date" type="date" value={pDate} onChange={(e) => setPDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="p-time">Hora</Label>
+              <Input id="p-time" type="time" value={pTime} onChange={(e) => setPTime(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProposing(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={sendProposal} disabled={!pDate || !pTime}>
+              <MessageCircle strokeWidth={1.5} />
+              Enviar por WhatsApp
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -315,12 +427,16 @@ function CitasPage() {
 function AppointmentCard({
   enriched,
   onEdit,
+  onConfirm,
+  onPropose,
   onChangeStatus,
   onReceive,
   onOpenOrder,
 }: {
   enriched: Enriched;
   onEdit: () => void;
+  onConfirm: () => void;
+  onPropose: () => void;
   onChangeStatus: (s: AppointmentStatus) => void;
   onReceive: () => void;
   onOpenOrder: () => void;
@@ -328,6 +444,7 @@ function AppointmentCard({
   const { appt, customer, vehicle, services, duration } = enriched;
   const transitions = nextAppointmentStatuses(appt.status);
   const canReceive = !!customer && !!vehicle;
+  const pending = appt.status === "pendiente";
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-border-strong">
@@ -373,6 +490,26 @@ function AppointmentCard({
       )}
       {appt.notes && (
         <p className="mt-2 text-sm text-muted-foreground">{appt.notes}</p>
+      )}
+
+      {pending && (
+        <div className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] p-3">
+          <p className="text-sm text-foreground">
+            {appt.proposed
+              ? "Le has propuesto esta hora. Cuando te diga que sí, confírmala."
+              : "Cita pedida desde la web. El cliente espera tu confirmación por WhatsApp."}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" className="h-8 bg-[#25D366] text-white hover:bg-[#1ebe5b]" onClick={onConfirm}>
+              <MessageCircle strokeWidth={1.75} className="h-3.5 w-3.5" />
+              Confirmar
+            </Button>
+            <Button size="sm" variant="outline" className="h-8" onClick={onPropose}>
+              <CalendarClock strokeWidth={1.5} className="h-3.5 w-3.5" />
+              Proponer otra hora
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Actions */}

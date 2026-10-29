@@ -10,6 +10,7 @@ export interface CheckInInput {
   fuelLevel: number; // 0-100
   bodyDamage: BodyDamageMark[];
   customerSignature?: string;
+  waiverLimit?: number;
 }
 
 /** Human label for a fuel level (0-100). */
@@ -35,6 +36,7 @@ export function saveCheckIn(
     fuelLevel: input.fuelLevel,
     bodyDamage: input.bodyDamage,
     customerSignature: input.customerSignature,
+    waiverLimit: input.waiverLimit,
     createdAt: order.checkIn?.createdAt ?? new Date().toISOString(),
   };
 

@@ -224,6 +224,15 @@ export function QuoteEditor({
         </div>
       )}
 
+      {/* Signed at check-in: no quote needed below an amount */}
+      {order.checkIn?.waiverLimit && order.items.length > 0 && !hidePrices ? (
+        <p className="mb-3 rounded-lg border border-border bg-background-subtle px-3 py-2 text-sm text-foreground">
+          {totals.total <= order.checkIn.waiverLimit
+            ? `El cliente firmó que no necesita presupuesto hasta ${money(order.checkIn.waiverLimit)}: puedes empezar sin esperar su aprobación.`
+            : `Supera los ${money(order.checkIn.waiverLimit)} que firmó el cliente: necesita su aprobación.`}
+        </p>
+      ) : null}
+
       {/* Lines added without a price (by a mechanic) */}
       {unpriced > 0 && !hidePrices && (
         <p className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-foreground">
@@ -242,6 +251,13 @@ export function QuoteEditor({
             <span>Total</span>
             <span className="tabular-nums">{money(totals.total)}</span>
           </div>
+          {/* What the customer accepted: what to charge */}
+          {order.quoteApproval && accepted.total !== totals.total && (
+            <div className="flex items-center justify-between text-base font-semibold text-[var(--success)]">
+              <span>Total aceptado (a cobrar)</span>
+              <span className="tabular-nums">{money(accepted.total)}</span>
+            </div>
+          )}
         </div>
       )}
 

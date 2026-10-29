@@ -144,3 +144,22 @@ export function quoteMessage(opts: {
     "Cualquier duda, respóndenos a este mensaje.",
   ].join("\n\n");
 }
+
+/** Online booking confirmed by the shop. */
+export function appointmentConfirmedMessage(o: {
+  customerName?: string;
+  tenantName: string;
+  when: string; // "jueves 30 de octubre a las 10:00"
+  plate?: string;
+}): string {
+  return `${greeting(o.customerName)} Te escribimos de ${o.tenantName}: tu cita queda confirmada para el ${o.when}${o.plate ? ` (${o.plate})` : ""}. ¡Te esperamos!`;
+}
+
+/** The shop can't take the requested time and proposes another. */
+export function appointmentProposalMessage(o: {
+  customerName?: string;
+  tenantName: string;
+  when: string;
+}): string {
+  return `${greeting(o.customerName)} Te escribimos de ${o.tenantName}. A la hora que pediste no podemos atenderte. ¿Te va bien el ${o.when}? Respóndenos por aquí y te la confirmamos.`;
+}

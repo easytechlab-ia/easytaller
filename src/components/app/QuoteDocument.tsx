@@ -74,7 +74,7 @@ export function QuoteDocument({
           <p className="font-display text-2xl font-bold text-slate-900">Presupuesto</p>
           <p className="font-mono">{quoteNumber(order)}</p>
           <p>Fecha: {formatDate(date)}</p>
-          <p>Válido 30 días</p>
+          <p>Válido {tenant.quoteValidityDays ?? 30} días</p>
         </div>
       </div>
 

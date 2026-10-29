@@ -19,6 +19,7 @@ const STATUS_MAP: Record<string, StatusMeta> = {
   entregado: { label: "Entregado", tone: "neutral" },
   cancelado: { label: "Cancelado", tone: "danger" },
   // AppointmentStatus
+  pendiente: { label: "Pendiente de confirmar", tone: "warning" },
   programada: { label: "Programada", tone: "neutral" },
   confirmada: { label: "Confirmada", tone: "accent" },
   en_taller: { label: "En taller", tone: "accent" },
