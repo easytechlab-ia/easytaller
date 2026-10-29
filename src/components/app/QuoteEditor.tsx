@@ -132,9 +132,9 @@ export function QuoteEditor({
       {/* Quick start: a whole service */}
       {services.length > 0 && (
         <Select value="" onValueChange={addService}>
-          <SelectTrigger className="mb-4 h-10 border-dashed">
-            <span className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Plus strokeWidth={1.5} className="h-4 w-4" />
+          <SelectTrigger className="mb-4 h-10 gap-2 border-dashed">
+            <Plus strokeWidth={1.5} className="h-4 w-4 text-muted-foreground" />
+            <span className="flex-1 text-left text-sm text-muted-foreground">
               Añadir un servicio (mano de obra + recambios)
             </span>
           </SelectTrigger>
