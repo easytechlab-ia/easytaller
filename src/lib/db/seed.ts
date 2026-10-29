@@ -42,7 +42,7 @@ import { DEMO_TENANT_ID, DEMO_TENANT_SLUG, IS_DEMO } from "@/lib/mode";
 const SEED_FLAG = "seeded";
 // Bump when the seed shape changes to force a clean reseed of the demo. The mode
 // is part of the version so switching demo ⇄ saas reseeds too.
-const SEED_VERSION = `15-${IS_DEMO ? "demo" : "saas"}`;
+const SEED_VERSION = `16-${IS_DEMO ? "demo" : "saas"}`;
 
 // Tiny base64 placeholder images (kept small to respect the ~5MB quota).
 const PHOTO_A =
@@ -137,27 +137,33 @@ const PLANS: Plan[] = [
 
 // ---- Catalog (prices are scaled by the tenant currency factor) -------------
 
-const SERVICE_NAMES: Array<[string, number, number]> = [
-  ["Cambio de aceite y filtro", 65, 45],
-  ["Revisión de frenos", 90, 60],
-  ["Cambio de embrague", 480, 240],
-  ["Diagnóstico electrónico", 45, 30],
-  ["Alineación y equilibrado", 70, 50],
-  ["Cambio de batería", 40, 25],
-  ["Distribución (correa)", 350, 180],
+// [name, labor hours, parts it usually needs: [part name, qty]]. The website
+// price is computed: hours × the shop's hourly rate + parts, IVA included.
+const SERVICE_NAMES: Array<[string, number, Array<[string, number]>]> = [
+  ["Cambio de aceite y filtro", 0.5, [["Aceite sintético 5W30 (1L)", 4], ["Filtro de aceite", 1]]],
+  ["Revisión de frenos", 1, []],
+  ["Cambio de embrague", 4, [["Kit de embrague", 1]]],
+  ["Diagnóstico electrónico", 1, []],
+  ["Alineación y equilibrado", 1, []],
+  ["Cambio de batería", 0.5, [["Batería 70Ah", 1]]],
+  ["Distribución (correa)", 3, [["Kit de distribución", 1]]],
+  ["Cambio de pastillas delanteras", 1, [["Pastillas de freno delanteras", 1]]],
 ];
 
-// [name, price, sku, stockQty, minStock, location]. Some parts are seeded at or
-// below their minimum so the "Bajo stock" badge and the alert show on the demo.
+// [name, sale price, purchase price, sku, stockQty, minStock, location,
+// supplier]. Some parts are at or below their minimum so "Por pedir" shows.
+// Suppliers are fictional.
 const PART_NAMES: Array<
-  [string, number, string, number, number, string]
+  [string, number, number, string, number, number, string, string]
 > = [
-  ["Filtro de aceite", 12.5, "FO-1024", 24, 8, "Estante A-1"],
-  ["Pastillas de freno delanteras", 48.0, "PF-2048", 3, 6, "Estante B-2"],
-  ["Aceite sintético 5W30 (1L)", 9.9, "AC-5W30", 40, 12, "Estante A-3"],
-  ["Batería 70Ah", 95.0, "BAT-70", 2, 3, "Estante C-1"],
-  ["Neumático 205/55 R16", 78.0, "NE-2055", 10, 4, "Almacén exterior"],
-  ["Kit de embrague", 210.0, "EMB-KIT", 1, 2, "Estante C-4"],
+  ["Filtro de aceite", 12.5, 6.2, "FO-1024", 24, 8, "Estante A-1", "Recambios Poblenou"],
+  ["Pastillas de freno delanteras", 48.0, 27.5, "PF-2048", 3, 6, "Estante B-2", "Recambios Poblenou"],
+  ["Discos de freno delanteros", 65.0, 38.0, "DF-2050", 4, 2, "Estante B-3", "Recambios Poblenou"],
+  ["Aceite sintético 5W30 (1L)", 9.9, 4.8, "AC-5W30", 40, 12, "Estante A-3", "Lubricantes Llobregat"],
+  ["Batería 70Ah", 95.0, 58.0, "BAT-70", 2, 3, "Estante C-1", "Distribuciones Motor BCN"],
+  ["Neumático 205/55 R16", 78.0, 49.0, "NE-2055", 10, 4, "Almacén exterior", "Neumáticos Sants"],
+  ["Kit de embrague", 210.0, 132.0, "EMB-KIT", 1, 2, "Estante C-4", "Distribuciones Motor BCN"],
+  ["Kit de distribución", 180.0, 112.0, "DIS-KIT", 2, 1, "Estante C-5", "Distribuciones Motor BCN"],
 ];
 
 // ---- Per-tenant seed shapes ------------------------------------------------
@@ -312,6 +318,7 @@ function buildItems(
   lines: QuoteLineSeed[] | undefined,
   status: WorkOrderStatus,
   f: number,
+  partIdByName?: Map<string, string>,
 ): QuoteItem[] {
   if (!lines) return [];
   const decided = quoteApproved(status);
@@ -328,6 +335,10 @@ function buildItems(
         : ("pending" as const),
     ...(l.warrantyMonths ? { warrantyMonths: l.warrantyMonths } : {}),
     ...(l.warrantyKm ? { warrantyKm: l.warrantyKm } : {}),
+    // Part lines that match a catalog part take it out of stock on "Listo".
+    ...(l.type === "part" && partIdByName?.get(l.description)
+      ? { partId: partIdByName.get(l.description) }
+      : {}),
   }));
 }
 
@@ -411,27 +422,42 @@ function seedTenant(ts: TenantSeed): void {
     active: true,
   } as Omit<User, "id">);
 
-  // Services & parts (scaled by currency factor).
-  const services: Service[] = SERVICE_NAMES.map(([name, basePrice, estimatedMinutes]) =>
-    servicesRepo.create(t, {
+  // Parts first (services reference them), then services. Prices scaled by
+  // the currency factor; the hourly rate too.
+  const parts: Part[] = PART_NAMES.map(
+    ([name, price, cost, sku, stockQty, minStock, location, supplier]) =>
+      partsRepo.create(t, {
+        tenantId: t,
+        name,
+        price: Math.round(price * f * 100) / 100,
+        cost: Math.round(cost * f * 100) / 100,
+        sku,
+        stockQty,
+        minStock,
+        location,
+        supplier,
+        lowStockNotified: false,
+      } as Omit<Part, "id">),
+  );
+  const partByName = new Map(parts.map((p) => [p.name, p]));
+  const rate = tenant.laborRate ?? 45 * f;
+  const services: Service[] = SERVICE_NAMES.map(([name, hours, needs]) => {
+    const used = needs
+      .map(([partName, qty]) => {
+        const part = partByName.get(partName);
+        return part ? { partId: part.id, qty, price: part.price } : null;
+      })
+      .filter((x): x is { partId: string; qty: number; price: number } => x !== null);
+    const net = hours * rate + used.reduce((sum, u) => sum + u.price * u.qty, 0);
+    return servicesRepo.create(t, {
       tenantId: t,
       name,
-      basePrice: Math.round(basePrice * f),
-      estimatedMinutes,
-    } as Omit<Service, "id">),
-  );
-  PART_NAMES.forEach(([name, price, sku, stockQty, minStock, location]) =>
-    partsRepo.create(t, {
-      tenantId: t,
-      name,
-      price: Math.round(price * f),
-      sku,
-      stockQty,
-      minStock,
-      location,
-      lowStockNotified: false,
-    } as Omit<Part, "id">),
-  );
+      laborHours: hours,
+      parts: used.map(({ partId, qty }) => ({ partId, qty })),
+      basePrice: Math.round(net * (1 + tenant.taxRate) * 100) / 100,
+      estimatedMinutes: Math.max(30, Math.round(hours * 60)),
+    } as Omit<Service, "id">);
+  });
 
   // Customers
   const customers: Customer[] = ts.customers.map((c, i) =>
@@ -487,7 +513,12 @@ function seedTenant(ts: TenantSeed): void {
   // Work orders
   ts.orders.forEach((spec, i) => {
     const v = vehicles[spec.vehicleIdx % vehicles.length];
-    const items = buildItems(spec.lines, spec.status, f);
+    const items = buildItems(
+      spec.lines,
+      spec.status,
+      f,
+      new Map(parts.map((p) => [p.name, p.id])),
+    );
     const decided = quoteApproved(spec.status);
     // Delivered orders are spread across past months/years so the km trend and
     // the per-year spend breakdown show history; active orders stay recent.
@@ -574,6 +605,9 @@ function seedTenant(ts: TenantSeed): void {
           : decided && items.length
             ? hoursAgo(34 - i)
             : undefined,
+      // Seeded cars already ready / delivered: their parts are already out.
+      stockUsedAt:
+        spec.status === "listo" || spec.status === "entregado" ? deliveredIso : undefined,
       estimatedReadyAt: daysFromNow((i % 3) + 1, 18),
       createdAt: baseIso,
       updatedAt: deliveredIso,
@@ -846,6 +880,7 @@ const EASYTECH: TenantSeed = {
     status: "active",
     currency: "EUR",
     taxRate: 0.21,
+    laborRate: 45,
     legalName: "Taller EasyTech (demo)",
     taxId: "B-00000000",
     email: "hola@tallereasytech.demo",
@@ -1114,6 +1149,7 @@ const AUTONORTE: TenantSeed = {
     status: "active",
     currency: "EUR",
     taxRate: 0.21,
+    laborRate: 40,
     legalName: "AutoNorte Reparaciones S.L.U.",
     taxId: "B-15123456",
     email: "contacto@autonorte.es",
@@ -1219,6 +1255,7 @@ const REYES: TenantSeed = {
     status: "active",
     currency: "MXN",
     taxRate: 0.16,
+    laborRate: 900,
     legalName: "Servicio Automotriz Reyes S.A. de C.V.",
     taxId: "SAR240115AB9",
     email: "contacto@tallerreyes.mx",
