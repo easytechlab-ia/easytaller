@@ -72,7 +72,10 @@ export function generateInvoiceFromOrder(
     subtotal,
     tax,
     total,
-    status: "pending",
+    // Paid when the car was handed back? Carry it over.
+    status: order.paymentMethod ? "paid" : "pending",
+    paymentMethod: order.paymentMethod,
+    paidAmount: order.paymentMethod ? total : undefined,
     createdAt: now,
   });
 

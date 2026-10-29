@@ -37,6 +37,11 @@ export interface Tenant {
   currency: string; // e.g. 'EUR'
   taxRate: number; // e.g. 0.21
   laborRate?: number; // labor price per hour, without IVA (e.g. 45)
+  diagnosisPrice?: number; // diagnosis fee without IVA, added to every quote (0/empty = none)
+  diagnosisWaived?: boolean; // the fee is not charged if the customer accepts the repair
+  // What a mechanic may do with quotes (set in Equipo).
+  mechanicCanAddLines?: boolean;
+  mechanicCanSeePrices?: boolean;
   locations: Location[];
   createdAt: string;
   // Configuration (set from /app/configuracion). All optional.
@@ -153,6 +158,8 @@ export interface QuoteItem {
   warrantyMonths?: number; // optional warranty in months for this line
   warrantyKm?: number; // optional warranty in kilometres for this line
   partId?: string; // links a "part" line to its catalog Part, to decrement stock
+  diagnosis?: boolean; // the diagnosis fee line (always charged unless waived)
+  needsPrice?: boolean; // added without a price (e.g. by a mechanic): someone must price it
 }
 
 export interface Photo {
@@ -291,6 +298,9 @@ export interface WorkOrder {
   // When the approved parts were taken out of stock (on "Listo"), so it only
   // happens once.
   stockUsedAt?: string;
+  // How the customer paid, asked when the car is handed back.
+  paymentMethod?: PaymentMethod;
+  paidAt?: string;
   estimatedReadyAt?: string;
   createdAt: string;
   updatedAt: string;
