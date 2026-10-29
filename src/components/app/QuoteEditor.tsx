@@ -1,12 +1,23 @@
-// EasyTaller — editor de presupuestos dentro de la ficha de orden. Permite añadir
-// líneas desde el catálogo (servicios/repuestos) o personalizadas, editarlas,
-// eliminarlas, ver totales en vivo con el IVA del taller y enviar el
-// presupuesto al cliente (simulado). Todo pasa por src/lib/quotes.ts.
+// EasyTaller — presupuesto de un coche, pensado para hacerse en un minuto.
+// Two blocks, as the customer will see them: MANO DE OBRA (hours × the shop's
+// hourly rate) and RECAMBIOS (units × price). "Añadir servicio" fills both at
+// once from the catalog; every line can be changed or removed. Then one button
+// sends it by WhatsApp, with the link where the customer accepts and signs.
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Send, ShieldCheck, Printer, BellRing } from "lucide-react";
+import {
+  BellRing,
+  Package,
+  Pencil,
+  Plus,
+  Printer,
+  Send,
+  ShieldCheck,
+  Trash2,
+  Wrench,
+} from "lucide-react";
+import { toast } from "sonner";
 import { DataCard } from "@/components/base/DataCard";
-import { StatusBadge } from "@/components/base/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,25 +39,25 @@ import { customersRepo, partsRepo, servicesRepo, vehiclesRepo } from "@/lib/db";
 import { QuotePrintDialog } from "@/components/app/QuoteDocument";
 import { QuoteWhatsAppDialog } from "@/components/app/QuoteWhatsAppDialog";
 import {
+  QUOTE_STAGE_LABELS,
   addQuoteItem,
+  addQuoteItems,
+  approvedTotals,
+  daysSince,
   lineAmount,
-  quoteSummary,
+  quoteBreakdown,
+  quoteSentDate,
+  quoteStage,
   removeQuoteItem,
-  updateQuoteItem,
   sendQuote,
+  updateQuoteItem,
   warrantyLabel,
   type QuoteItemInput,
-  quoteStage,
 } from "@/lib/quotes";
-import { quoteTotals } from "@/lib/orders";
+import { hoursLabel, laborRate, serviceQuoteLines } from "@/lib/catalog";
 import { formatCurrencyCents } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { QuoteItem, Tenant, WorkOrder } from "@/types";
-import { toast } from "sonner";
-
-const TYPE_LABEL: Record<QuoteItem["type"], string> = {
-  labor: "Mano de obra",
-  part: "Repuesto",
-};
 
 export function QuoteEditor({
   order,
@@ -57,190 +68,173 @@ export function QuoteEditor({
   tenant: Tenant;
   onSaved: () => void;
 }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<QuoteItem | null>(null);
+  const [editing, setEditing] = useState<{ type: QuoteItem["type"]; item: QuoteItem | null } | null>(
+    null,
+  );
   const [waOpen, setWaOpen] = useState(false);
   const [waReminder, setWaReminder] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const customer = customersRepo.getById(tenant.id, order.customerId);
   const vehicle = vehiclesRepo.getById(tenant.id, order.vehicleId);
+  const services = useMemo(
+    () => servicesRepo.list(tenant.id).sort((a, b) => a.name.localeCompare(b.name)),
+    [tenant.id],
+  );
+
   const stage = quoteStage(order);
+  const answered = !!order.quoteApproval && stage !== "draft" && stage !== "sent";
+  const totals = quoteBreakdown(order.items, tenant.taxRate);
+  const accepted = approvedTotals(order.items, tenant.taxRate);
+  const money = (n: number) => formatCurrencyCents(n, tenant.currency);
+  const labor = order.items.filter((i) => i.type === "labor");
+  const parts = order.items.filter((i) => i.type === "part");
+  const waitingDays = stage === "sent" ? daysSince(quoteSentDate(order)) : undefined;
 
-  const totals = quoteTotals(order.items, tenant.taxRate);
-  const summary = quoteSummary(order.items);
-  const taxPct = Math.round(tenant.taxRate * 100);
+  const addService = (serviceId: string) => {
+    const service = services.find((s) => s.id === serviceId);
+    if (!service) return;
+    addQuoteItems(tenant.id, order, serviceQuoteLines(tenant, service));
+    toast.success(`«${service.name}» añadido`);
+    onSaved();
+  };
 
-  const openAdd = () => {
+  const submit = (input: QuoteItemInput) => {
+    if (editing?.item) updateQuoteItem(tenant.id, order, editing.item.id, input);
+    else addQuoteItem(tenant.id, order, input);
     setEditing(null);
-    setDialogOpen(true);
-  };
-  const openEdit = (item: QuoteItem) => {
-    setEditing(item);
-    setDialogOpen(true);
+    onSaved();
   };
 
-  const handleRemove = (item: QuoteItem) => {
+  const remove = (item: QuoteItem) => {
     removeQuoteItem(tenant.id, order, item.id);
-    toast.success("Línea eliminada");
     onSaved();
   };
 
-  const handleSubmit = (input: QuoteItemInput) => {
-    if (editing) {
-      updateQuoteItem(tenant.id, order, editing.id, input);
-      toast.success("Línea actualizada");
-    } else {
-      addQuoteItem(tenant.id, order, input);
-      toast.success("Línea añadida");
-    }
-    setDialogOpen(false);
-    onSaved();
-  };
-
-  const handleSend = () => {
-    if (order.items.length === 0) {
-      toast.error("Añade al menos una línea antes de enviar.");
-      return;
-    }
+  const send = () => {
     sendQuote(tenant, order);
     onSaved();
-    // Open WhatsApp with the message and the link to approve it.
     setWaReminder(false);
     setWaOpen(true);
   };
 
-  const handleRemind = () => {
-    setWaReminder(true);
-    setWaOpen(true);
-  };
-
   return (
-    <DataCard
-      title="Presupuesto"
-      actions={
-        <Button size="sm" variant="outline" onClick={openAdd}>
-          <Plus strokeWidth={1.5} />
-          Añadir línea
-        </Button>
-      }
-    >
-      {order.items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Aún no hay líneas de presupuesto. Añade mano de obra o repuestos.
+    <DataCard title="Presupuesto">
+      {/* Where it is */}
+      {stage && (
+        <p className="-mt-1 mb-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{QUOTE_STAGE_LABELS[stage]}</span>
+          {waitingDays !== undefined &&
+            ` · ${waitingDays === 0 ? "enviado hoy" : `hace ${waitingDays} ${waitingDays === 1 ? "día" : "días"}`}`}
+          {answered && ` · aceptado ${money(accepted.total)} de ${money(totals.total)}`}
         </p>
-      ) : (
-        <div className="space-y-2">
-          {order.items.map((it) => (
-            <div
-              key={it.id}
-              className="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-md bg-background-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                    {TYPE_LABEL[it.type]}
-                  </span>
-                  <StatusBadge status={it.approval} />
-                </div>
-                <p className="mt-1 truncate text-sm text-foreground">
-                  {it.description}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {it.qty} × {formatCurrencyCents(it.unitPrice, tenant.currency)}
-                </p>
-                {warrantyLabel(it) && (
-                  <p className="mt-1 inline-flex items-center gap-1 rounded-md bg-background-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                    <ShieldCheck strokeWidth={1.5} className="h-3 w-3" />
-                    Garantía: {warrantyLabel(it)}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-3 sm:justify-end">
-                <span className="text-sm font-medium text-foreground">
-                  {formatCurrencyCents(lineAmount(it), tenant.currency)}
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8"
-                    onClick={() => openEdit(it)}
-                    aria-label="Editar línea"
-                  >
-                    <Pencil strokeWidth={1.5} className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-[var(--destructive)]"
-                    onClick={() => handleRemove(it)}
-                    aria-label="Eliminar línea"
-                  >
-                    <Trash2 strokeWidth={1.5} className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       )}
+
+      {/* Quick start: a whole service */}
+      {services.length > 0 && (
+        <Select value="" onValueChange={addService}>
+          <SelectTrigger className="mb-4 h-10 border-dashed">
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Plus strokeWidth={1.5} className="h-4 w-4" />
+              Añadir un servicio (mano de obra + recambios)
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {services.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      <Block
+        icon={Wrench}
+        title="Mano de obra"
+        subtotal={money(totals.labor)}
+        empty="Sin horas de mano de obra."
+        addLabel="Añadir horas"
+        onAdd={() => setEditing({ type: "labor", item: null })}
+      >
+        {labor.map((it) => (
+          <Line
+            key={it.id}
+            item={it}
+            detail={`${hoursLabel(it.qty)} × ${money(it.unitPrice)}/h`}
+            amount={money(lineAmount(it))}
+            showApproval={answered || stage === "sent"}
+            onEdit={() => setEditing({ type: "labor", item: it })}
+            onRemove={() => remove(it)}
+          />
+        ))}
+      </Block>
+
+      <Block
+        icon={Package}
+        title="Recambios"
+        subtotal={money(totals.parts)}
+        empty="Sin recambios."
+        addLabel="Añadir recambio"
+        onAdd={() => setEditing({ type: "part", item: null })}
+      >
+        {parts.map((it) => (
+          <Line
+            key={it.id}
+            item={it}
+            detail={`${it.qty} × ${money(it.unitPrice)}`}
+            amount={money(lineAmount(it))}
+            showApproval={answered || stage === "sent"}
+            onEdit={() => setEditing({ type: "part", item: it })}
+            onRemove={() => remove(it)}
+          />
+        ))}
+      </Block>
 
       {/* Totals */}
       {order.items.length > 0 && (
         <div className="mt-4 space-y-1 border-t border-border pt-3 text-sm">
-          <Row
-            label="Subtotal"
-            value={formatCurrencyCents(totals.subtotal, tenant.currency)}
-          />
-          <Row
-            label={`IVA (${taxPct}%)`}
-            value={formatCurrencyCents(totals.tax, tenant.currency)}
-          />
+          <Row label="Base imponible" value={money(totals.subtotal)} />
+          <Row label={`IVA (${Math.round(tenant.taxRate * 100)}%)`} value={money(totals.tax)} />
           <div className="flex items-center justify-between pt-1 text-base font-semibold text-foreground">
             <span>Total</span>
-            <span>{formatCurrencyCents(totals.total, tenant.currency)}</span>
+            <span className="tabular-nums">{money(totals.total)}</span>
           </div>
         </div>
       )}
 
-      {/* Approval summary + send */}
-      <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">
-          {summary.total} {summary.total === 1 ? "línea" : "líneas"} ·{" "}
-          <span className="text-[var(--warning)]">{summary.pending} pend.</span>{" "}
-          ·{" "}
-          <span className="text-[var(--success)]">
-            {summary.approved} aprob.
-          </span>{" "}
-          ·{" "}
-          <span className="text-[var(--destructive)]">
-            {summary.rejected} rech.
-          </span>
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setPrintOpen(true)}
-            disabled={order.items.length === 0}
-          >
+      {/* Actions */}
+      {order.items.length > 0 && (
+        <div className="mt-4 flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
+          <Button variant="outline" onClick={() => setPrintOpen(true)}>
             <Printer strokeWidth={1.5} />
-            PDF
+            Ver PDF
           </Button>
           {stage === "sent" ? (
-            <Button size="sm" onClick={handleRemind}>
+            <Button
+              onClick={() => {
+                setWaReminder(true);
+                setWaOpen(true);
+              }}
+            >
               <BellRing strokeWidth={1.5} />
               Recordar por WhatsApp
             </Button>
-          ) : (
-            <Button size="sm" onClick={handleSend} disabled={order.items.length === 0}>
+          ) : stage === "draft" ? (
+            <Button onClick={send}>
               <Send strokeWidth={1.5} />
-              {order.quoteApproval ? "Enviar cambios" : "Enviar presupuesto"}
+              {order.quoteApproval ? "Enviar los cambios por WhatsApp" : "Enviar al cliente por WhatsApp"}
             </Button>
-          )}
+          ) : null}
         </div>
-      </div>
+      )}
 
+      <LineDialog
+        key={`${editing?.type}-${editing?.item?.id ?? "new"}`}
+        state={editing}
+        tenant={tenant}
+        onClose={() => setEditing(null)}
+        onSubmit={submit}
+      />
       <QuoteWhatsAppDialog
         open={waOpen}
         onOpenChange={setWaOpen}
@@ -258,213 +252,240 @@ export function QuoteEditor({
         customer={customer}
         vehicle={vehicle}
       />
-
-      <QuoteItemDialog
-        key={editing?.id ?? "new"}
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        tenant={tenant}
-        item={editing}
-        onSubmit={handleSubmit}
-      />
     </DataCard>
   );
 }
 
-const CUSTOM = "__custom__";
+function Block({
+  icon: Icon,
+  title,
+  subtotal,
+  empty,
+  addLabel,
+  onAdd,
+  children,
+}: {
+  icon: typeof Wrench;
+  title: string;
+  subtotal: string;
+  empty: string;
+  addLabel: string;
+  onAdd: () => void;
+  children: React.ReactNode[];
+}) {
+  return (
+    <section className="mb-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <Icon strokeWidth={1.75} className="h-3.5 w-3.5" />
+          {title}
+        </h3>
+        <span className="text-sm font-medium tabular-nums text-foreground">{subtotal}</span>
+      </div>
+      <div className="space-y-1.5">
+        {children.length === 0 && <p className="text-sm text-muted-foreground">{empty}</p>}
+        {children}
+      </div>
+      <Button variant="ghost" size="sm" className="mt-1 h-8 px-2 text-primary" onClick={onAdd}>
+        <Plus strokeWidth={1.5} />
+        {addLabel}
+      </Button>
+    </section>
+  );
+}
 
-function QuoteItemDialog({
-  open,
-  onOpenChange,
-  tenant,
+const APPROVAL_TAG: Record<QuoteItem["approval"], { label: string; className: string }> = {
+  pending: { label: "Pendiente", className: "text-[var(--warning)]" },
+  approved: { label: "Aceptado", className: "text-[var(--success)]" },
+  rejected: { label: "No lo quiere", className: "text-[var(--destructive)]" },
+};
+
+function Line({
   item,
+  detail,
+  amount,
+  showApproval,
+  onEdit,
+  onRemove,
+}: {
+  item: QuoteItem;
+  detail: string;
+  amount: string;
+  showApproval: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const warranty = warrantyLabel(item);
+  const tag = APPROVAL_TAG[item.approval];
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-lg border border-border px-3 py-2",
+        item.approval === "rejected" && "opacity-60",
+      )}
+    >
+      <button type="button" onClick={onEdit} className="min-w-0 flex-1 text-left">
+        <p className={cn("truncate text-sm text-foreground", item.approval === "rejected" && "line-through")}>
+          {item.description}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {detail}
+          {warranty && (
+            <span className="ml-2 inline-flex items-center gap-0.5">
+              <ShieldCheck strokeWidth={1.5} className="h-3 w-3" />
+              {warranty}
+            </span>
+          )}
+          {showApproval && <span className={cn("ml-2 font-medium", tag.className)}>{tag.label}</span>}
+        </p>
+      </button>
+      <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">{amount}</span>
+      <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={onEdit} aria-label="Editar línea">
+        <Pencil strokeWidth={1.5} className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8 shrink-0 text-[var(--destructive)]"
+        onClick={onRemove}
+        aria-label="Quitar línea"
+      >
+        <Trash2 strokeWidth={1.5} className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+const OTHER = "__other__";
+
+function num(v: string): number {
+  return Number(v.replace(",", ".")) || 0;
+}
+
+/** Add / edit one line. Labor: hours × price per hour. Part: from the catalog. */
+function LineDialog({
+  state,
+  tenant,
+  onClose,
   onSubmit,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  state: { type: QuoteItem["type"]; item: QuoteItem | null } | null;
   tenant: Tenant;
-  item: QuoteItem | null;
+  onClose: () => void;
   onSubmit: (input: QuoteItemInput) => void;
 }) {
-  const services = useMemo(() => servicesRepo.list(tenant.id), [tenant.id]);
-  const parts = useMemo(() => partsRepo.list(tenant.id), [tenant.id]);
-
-  const [type, setType] = useState<QuoteItem["type"]>(item?.type ?? "labor");
-  const [catalogId, setCatalogId] = useState<string>(item?.partId ?? CUSTOM);
-  const [partId, setPartId] = useState<string | undefined>(item?.partId);
+  const type = state?.type ?? "labor";
+  const item = state?.item ?? null;
+  const parts = useMemo(
+    () => partsRepo.list(tenant.id).sort((a, b) => a.name.localeCompare(b.name)),
+    [tenant.id],
+  );
+  const [partId, setPartId] = useState<string>(item?.partId ?? (item ? OTHER : ""));
   const [description, setDescription] = useState(item?.description ?? "");
-  const [qty, setQty] = useState(String(item?.qty ?? 1));
-  const [unitPrice, setUnitPrice] = useState(String(item?.unitPrice ?? 0));
-  const [warrantyMonths, setWarrantyMonths] = useState(
-    item?.warrantyMonths != null ? String(item.warrantyMonths) : "",
+  const [qty, setQty] = useState(String(item?.qty ?? 1).replace(".", ","));
+  const [price, setPrice] = useState(
+    String(item?.unitPrice ?? (type === "labor" ? laborRate(tenant) : "")).replace(".", ","),
   );
-  const [warrantyKm, setWarrantyKm] = useState(
-    item?.warrantyKm != null ? String(item.warrantyKm) : "",
-  );
+  const [months, setMonths] = useState(item?.warrantyMonths ? String(item.warrantyMonths) : "");
+  const [km, setKm] = useState(item?.warrantyKm ? String(item.warrantyKm) : "");
 
-  const onTypeChange = (v: QuoteItem["type"]) => {
-    setType(v);
-    setCatalogId(CUSTOM);
-    setPartId(undefined);
-  };
-
-  const onCatalogChange = (v: string) => {
-    setCatalogId(v);
-    if (v === CUSTOM) {
-      setPartId(undefined);
-      return;
-    }
-    if (type === "labor") {
-      const s = services.find((x) => x.id === v);
-      if (s) {
-        setDescription(s.name);
-        setUnitPrice(String(s.basePrice));
-      }
-    } else {
-      const p = parts.find((x) => x.id === v);
-      if (p) {
-        setDescription(p.name);
-        setUnitPrice(String(p.price));
-        setPartId(p.id);
-      }
+  const pickPart = (id: string) => {
+    setPartId(id);
+    const p = parts.find((x) => x.id === id);
+    if (p) {
+      setDescription(p.name);
+      setPrice(String(p.price).replace(".", ","));
     }
   };
 
-  const qtyNum = Number(qty) || 0;
-  const priceNum = Number(unitPrice) || 0;
-  const amount = qtyNum * priceNum;
-  const valid = description.trim().length > 0 && qtyNum > 0 && priceNum >= 0;
+  const q = num(qty);
+  const pr = num(price);
+  const valid = description.trim().length > 0 && q > 0 && pr >= 0;
+  const money = (n: number) => formatCurrencyCents(n, tenant.currency);
 
   const submit = () => {
     if (!valid) return;
-    const months = Number(warrantyMonths);
-    const km = Number(warrantyKm);
     onSubmit({
       type,
       description: description.trim(),
-      qty: qtyNum,
-      unitPrice: priceNum,
-      warrantyMonths:
-        warrantyMonths.trim() !== "" && months > 0 ? Math.round(months) : undefined,
-      warrantyKm:
-        warrantyKm.trim() !== "" && km > 0 ? Math.round(km) : undefined,
-      partId: type === "part" ? partId : undefined,
+      qty: q,
+      unitPrice: pr,
+      warrantyMonths: num(months) > 0 ? Math.round(num(months)) : undefined,
+      warrantyKm: num(km) > 0 ? Math.round(num(km)) : undefined,
+      partId: type === "part" && partId && partId !== OTHER ? partId : undefined,
     });
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+    <Dialog open={!!state} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{item ? "Editar línea" : "Añadir línea"}</DialogTitle>
+          <DialogTitle>
+            {item ? "Editar" : "Añadir"} {type === "labor" ? "mano de obra" : "recambio"}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>Tipo</Label>
-            <Select value={type} onValueChange={(v) => onTypeChange(v as QuoteItem["type"])}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="labor">Mano de obra</SelectItem>
-                <SelectItem value="part">Repuesto</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {type === "part" && (
+            <div className="space-y-1.5">
+              <Label>Recambio</Label>
+              <Select value={partId} onValueChange={pickPart}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Elige de tu almacén" />
+                </SelectTrigger>
+                <SelectContent>
+                  {parts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} · {money(p.price)}
+                      {p.stockQty != null ? ` · quedan ${p.stockQty}` : ""}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={OTHER}>Otro (escribir a mano)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-          <div className="space-y-1.5">
-            <Label>{type === "labor" ? "Servicio" : "Repuesto"}</Label>
-            <Select value={catalogId} onValueChange={onCatalogChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={CUSTOM}>Personalizado</SelectItem>
-                {type === "labor"
-                  ? services.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name} · {formatCurrencyCents(s.basePrice, tenant.currency)}
-                      </SelectItem>
-                    ))
-                  : parts.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name} · {formatCurrencyCents(p.price, tenant.currency)}
-                      </SelectItem>
-                    ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Descripción</Label>
-            <Input
-              value={description}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                setCatalogId(CUSTOM);
-                setPartId(undefined);
-              }}
-              placeholder="Descripción de la línea"
-              maxLength={160}
-            />
-          </div>
+          {(type === "labor" || partId === OTHER || item) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="l-desc">{type === "labor" ? "Trabajo" : "Descripción"}</Label>
+              <Input
+                id="l-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={type === "labor" ? "Cambio de pastillas" : "Nombre del recambio"}
+                maxLength={160}
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Cantidad</Label>
-              <Input
-                type="number"
-                min={1}
-                step="1"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-              />
+              <Label htmlFor="l-qty">{type === "labor" ? "Horas" : "Cantidad"}</Label>
+              <Input id="l-qty" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Precio unitario</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
-              />
+              <Label htmlFor="l-price">{type === "labor" ? "Precio por hora" : "Precio por unidad"}</Label>
+              <Input id="l-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
             </div>
           </div>
 
           <div className="space-y-1.5">
             <Label>Garantía (opcional)</Label>
             <div className="grid grid-cols-2 gap-3">
-              <Input
-                type="number"
-                min={0}
-                step="1"
-                value={warrantyMonths}
-                onChange={(e) => setWarrantyMonths(e.target.value)}
-                placeholder="Meses"
-              />
-              <Input
-                type="number"
-                min={0}
-                step="1"
-                value={warrantyKm}
-                onChange={(e) => setWarrantyKm(e.target.value)}
-                placeholder="Kilómetros"
-              />
+              <Input inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value)} placeholder="Meses" />
+              <Input inputMode="numeric" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Kilómetros" />
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-border bg-background-subtle px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Importe</span>
-            <span className="font-medium text-foreground">
-              {formatCurrencyCents(amount, tenant.currency)}
-            </span>
+          <div className="flex items-center justify-between rounded-lg bg-background-subtle px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Importe (sin IVA)</span>
+            <span className="font-medium tabular-nums text-foreground">{money(q * pr)}</span>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
           <Button onClick={submit} disabled={!valid}>
@@ -480,7 +501,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between text-muted-foreground">
       <span>{label}</span>
-      <span>{value}</span>
+      <span className="tabular-nums">{value}</span>
     </div>
   );
 }

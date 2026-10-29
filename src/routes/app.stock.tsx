@@ -1,20 +1,13 @@
-// Talleo — Stock / Inventario. Extends the parts catalog with inventory
-// management: current units, minimum stock, warehouse location, a "Bajo stock"
-// badge, search + low-stock filter, inline inventory editing and quick
-// entrada/salida adjustments. Catalog CRUD (name/price/SKU) stays in /app/servicios.
-// Everything is local & simulated.
+// EasyTaller — Recambios. The parts catalog and its stock in one place: code,
+// supplier, purchase / sale price and units. Stock goes down on its own when a
+// car is marked "Listo" (the parts the customer approved) and up with
+// "Entrada" when an order arrives. "Por pedir" lists what's at or below its
+// minimum, grouped by supplier, so the shop knows whom to call. All local.
 
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  Search,
-  Boxes,
-  Plus,
-  Minus,
-  Pencil,
-  MapPin,
-  AlertTriangle,
-} from "lucide-react";
+import { Boxes, PackagePlus, Pencil, Plus, Search, Trash2, Truck } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/base/PageHeader";
 import { EmptyState } from "@/components/base/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -28,65 +21,140 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { PartFormDialog } from "@/components/app/PartFormDialog";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { partsRepo } from "@/lib/db";
-import { listStock, isLowStock, adjustStock } from "@/lib/stock";
-import { formatCurrency } from "@/lib/format";
 import { canEdit } from "@/lib/permissions";
+import { partsRepo } from "@/lib/db";
+import { adjustStock, isLowStock, listStock } from "@/lib/stock";
+import { formatCurrencyCents } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Part } from "@/types";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/stock")({
-  component: StockPage,
+  component: PartsPage,
 });
 
-function LowStockBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2 py-0.5 text-xs font-medium text-[var(--warning)]">
-      <AlertTriangle strokeWidth={1.5} className="h-3 w-3" />
-      Bajo stock
-    </span>
-  );
-}
+type Filter = "all" | "order";
 
-function StockPage() {
-  const { tenant, user } = useAuth();
+function PartsPage() {
+  const { user, tenant } = useAuth();
   const [version, setVersion] = useState(0);
   const [query, setQuery] = useState("");
-  const [onlyLow, setOnlyLow] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<Part | null>(null);
-  const [adjusting, setAdjusting] = useState<Part | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [receiving, setReceiving] = useState<Part | null>(null);
+  const [toDelete, setToDelete] = useState<Part | null>(null);
+
+  const parts = useMemo(
+    () => (tenant ? listStock(tenant.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tenant, version],
+  );
 
   if (!tenant || !user) return null;
   const editable = canEdit(user.role, "stock");
-  const currency = tenant.currency;
-
-  const parts = useMemo(() => listStock(tenant.id), [tenant.id, version]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return parts.filter((p) => {
-      if (onlyLow && !isLowStock(p)) return false;
-      if (!q) return true;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.sku ?? "").toLowerCase().includes(q) ||
-        (p.location ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [parts, query, onlyLow]);
-
+  const money = (n: number) => formatCurrencyCents(n, tenant.currency);
   const refresh = () => setVersion((v) => v + 1);
+
+  const toOrder = parts.filter(isLowStock);
+  const q = query.trim().toLowerCase();
+  const shown = (filter === "order" ? toOrder : parts).filter(
+    (p) =>
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      (p.sku ?? "").toLowerCase().includes(q) ||
+      (p.supplier ?? "").toLowerCase().includes(q),
+  );
+
+  // "Por pedir" is grouped by supplier: who to call and what to ask for.
+  const bySupplier = new Map<string, Part[]>();
+  if (filter === "order") {
+    for (const p of shown) {
+      const key = p.supplier?.trim() || "Sin proveedor";
+      bySupplier.set(key, [...(bySupplier.get(key) ?? []), p]);
+    }
+  }
+
+  const remove = () => {
+    if (!toDelete) return;
+    partsRepo.remove(tenant.id, toDelete.id);
+    toast.success("Recambio eliminado");
+    setToDelete(null);
+    refresh();
+  };
+
+  const card = (p: Part) => (
+    <PartCard
+      key={p.id}
+      part={p}
+      money={money}
+      editable={editable}
+      onEdit={() => {
+        setEditing(p);
+        setFormOpen(true);
+      }}
+      onReceive={() => setReceiving(p)}
+      onDelete={() => setToDelete(p)}
+    />
+  );
 
   return (
     <div>
       <PageHeader
-        title="Stock"
-        description="Inventario de repuestos: existencias, mínimos y ubicación."
+        title="Recambios"
+        description="Tu almacén: precios, proveedor y stock. El stock baja solo cuando marcas un coche como «Listo»."
+        actions={
+          editable ? (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus strokeWidth={1.5} />
+              Nuevo recambio
+            </Button>
+          ) : undefined
+        }
       />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+        <div className="flex gap-2">
+          {(
+            [
+              ["all", `Todos ${parts.length}`],
+              ["order", `Por pedir ${toOrder.length}`],
+            ] as Array<[Filter, string]>
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilter(value)}
+              className={cn(
+                "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                filter === value
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : value === "order" && toOrder.length > 0
+                    ? "border-[var(--destructive)]/40 text-[var(--destructive)]"
+                    : "border-border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="relative max-w-md flex-1">
           <Search
             strokeWidth={1.5}
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -94,366 +162,204 @@ function StockPage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar repuesto, SKU o ubicación…"
+            placeholder="Buscar por nombre, código o proveedor…"
             className="pl-9"
           />
         </div>
-        <Button
-          variant={onlyLow ? "default" : "outline"}
-          onClick={() => setOnlyLow((v) => !v)}
-        >
-          <AlertTriangle strokeWidth={1.5} />
-          Solo bajo stock
-        </Button>
       </div>
 
-      {filtered.length === 0 ? (
+      {shown.length === 0 ? (
         <EmptyState
           icon={Boxes}
           title={
-            onlyLow
-              ? "Sin repuestos bajo stock"
-              : query
-                ? "Sin resultados"
-                : "Aún no hay repuestos"
+            filter === "order" ? "No falta nada" : q ? "Sin resultados" : "Aún no hay recambios"
           }
           description={
-            onlyLow
-              ? "Todo el inventario está por encima del mínimo."
-              : query
-                ? "Prueba con otro término de búsqueda."
-                : "Crea repuestos desde el Catálogo para gestionarlos aquí."
+            filter === "order"
+              ? "Todos los recambios están por encima de su mínimo."
+              : q
+                ? "Prueba con otro nombre o código."
+                : "Da de alta los recambios que usas para añadirlos a los presupuestos."
           }
         />
+      ) : filter === "order" ? (
+        <div className="space-y-5">
+          {[...bySupplier.entries()].map(([supplier, list]) => (
+            <section key={supplier}>
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Truck strokeWidth={1.5} className="h-4 w-4 text-muted-foreground" />
+                {supplier}
+                <span className="font-normal text-muted-foreground">
+                  · {list.length} {list.length === 1 ? "recambio" : "recambios"}
+                </span>
+              </h2>
+              <ul className="space-y-2">{list.map(card)}</ul>
+            </section>
+          ))}
+        </div>
       ) : (
-        <>
-          {/* Mobile: cards */}
-          <div className="space-y-3 md:hidden">
-            {filtered.map((p) => {
-              const low = isLowStock(p);
-              return (
-                <div
-                  key={p.id}
-                  className="rounded-xl border border-border bg-card p-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-foreground">{p.name}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                        <span>{formatCurrency(p.price, currency)}</span>
-                        {p.sku && (
-                          <span className="font-mono text-xs">{p.sku}</span>
-                        )}
-                        {p.location && (
-                          <span className="inline-flex items-center gap-1 text-xs">
-                            <MapPin strokeWidth={1.5} className="h-3 w-3" />
-                            {p.location}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {low && <LowStockBadge />}
-                  </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-sm text-foreground">
-                      <span
-                        className={cn(
-                          "font-semibold tabular-nums",
-                          low && "text-[var(--warning)]",
-                        )}
-                      >
-                        {p.stockQty ?? 0}
-                      </span>{" "}
-                      <span className="text-xs text-muted-foreground">
-                        / mín. {p.minStock ?? 0}
-                      </span>
-                    </span>
-                    {editable && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setAdjusting(p)}
-                        >
-                          Ajustar
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => setEditing(p)}
-                          aria-label="Editar inventario"
-                        >
-                          <Pencil strokeWidth={1.5} className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Desktop: table */}
-          <div className="hidden overflow-hidden rounded-xl border border-border md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border bg-background-subtle text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Repuesto</th>
-                  <th className="px-4 py-3 font-medium">SKU</th>
-                  <th className="px-4 py-3 font-medium">Ubicación</th>
-                  <th className="px-4 py-3 font-medium">Stock</th>
-                  <th className="px-4 py-3 font-medium">Mínimo</th>
-                  <th className="px-4 py-3 font-medium">Precio</th>
-                  {editable && <th className="px-4 py-3" />}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => {
-                  const low = isLowStock(p);
-                  return (
-                    <tr
-                      key={p.id}
-                      className="border-b border-border last:border-0 transition-colors hover:bg-background-subtle"
-                    >
-                      <td className="px-4 py-3 font-medium text-foreground">
-                        <div className="flex items-center gap-2">
-                          {p.name}
-                          {low && <LowStockBadge />}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {p.sku ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {p.location ?? "—"}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-3 font-semibold tabular-nums text-foreground",
-                          low && "text-[var(--warning)]",
-                        )}
-                      >
-                        {p.stockQty ?? 0}
-                      </td>
-                      <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                        {p.minStock ?? 0}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {formatCurrency(p.price, currency)}
-                      </td>
-                      {editable && (
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setAdjusting(p)}
-                            >
-                              Ajustar
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8"
-                              onClick={() => setEditing(p)}
-                              aria-label="Editar inventario"
-                            >
-                              <Pencil strokeWidth={1.5} className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <ul className="space-y-2">{shown.map(card)}</ul>
       )}
 
-      <InventoryDialog
-        key={`edit-${editing?.id ?? "none"}`}
+      <PartFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        tenant={tenant}
         part={editing}
-        tenantId={tenant.id}
-        onOpenChange={(o) => !o && setEditing(null)}
-        onSaved={() => {
-          setEditing(null);
+        onSaved={refresh}
+      />
+
+      <ReceiveDialog
+        part={receiving}
+        onClose={() => setReceiving(null)}
+        onSave={(qty) => {
+          if (!receiving) return;
+          adjustStock(tenant.id, receiving.id, qty);
+          toast.success(`Entrada de ${qty} ${qty === 1 ? "unidad" : "unidades"} registrada`);
+          setReceiving(null);
           refresh();
         }}
       />
 
-      <AdjustDialog
-        key={`adj-${adjusting?.id ?? "none"}`}
-        part={adjusting}
-        tenantId={tenant.id}
-        currency={currency}
-        onOpenChange={(o) => !o && setAdjusting(null)}
-        onSaved={() => {
-          setAdjusting(null);
-          refresh();
-        }}
-      />
+      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar «{toDelete?.name}»?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deja de aparecer en los presupuestos y en los servicios que lo usan. Los presupuestos
+              ya hechos no cambian.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={remove}>Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-// ── Editar inventario ─────────────────────────────────────────────────────
-
-function InventoryDialog({
-  part,
-  tenantId,
-  onOpenChange,
-  onSaved,
+function PartCard({
+  part: p,
+  money,
+  editable,
+  onEdit,
+  onReceive,
+  onDelete,
 }: {
-  part: Part | null;
-  tenantId: string;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
+  part: Part;
+  money: (n: number) => string;
+  editable: boolean;
+  onEdit: () => void;
+  onReceive: () => void;
+  onDelete: () => void;
 }) {
-  const [stockQty, setStockQty] = useState(String(part?.stockQty ?? 0));
-  const [minStock, setMinStock] = useState(String(part?.minStock ?? 0));
-  const [location, setLocation] = useState(part?.location ?? "");
-
-  if (!part) return null;
-
-  const submit = () => {
-    const qty = Math.max(0, Math.round(Number(stockQty) || 0));
-    const min = Math.max(0, Math.round(Number(minStock) || 0));
-    const patch: Partial<Part> = {
-      stockQty: qty,
-      minStock: min,
-      location: location.trim() || undefined,
-    };
-    // Re-arm the low-stock alert if it's now above the minimum.
-    if (part.lowStockNotified && qty > min) patch.lowStockNotified = false;
-    partsRepo.update(tenantId, part.id, patch);
-    toast.success("Inventario actualizado");
-    onSaved();
-  };
-
+  const low = isLowStock(p);
+  const tracked = p.stockQty != null;
   return (
-    <Dialog open={!!part} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Editar inventario</DialogTitle>
-          <DialogDescription>{part.name}</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="s-qty">Stock actual</Label>
-              <Input
-                id="s-qty"
-                type="number"
-                min={0}
-                step="1"
-                value={stockQty}
-                onChange={(e) => setStockQty(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="s-min">Stock mínimo</Label>
-              <Input
-                id="s-min"
-                type="number"
-                min={0}
-                step="1"
-                value={minStock}
-                onChange={(e) => setMinStock(e.target.value)}
-              />
-            </div>
+    <li className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="font-medium text-foreground">
+          {p.name}
+          {p.sku && <span className="ml-2 font-mono text-xs text-muted-foreground">{p.sku}</span>}
+        </p>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {p.supplier ? p.supplier : "Sin proveedor"} · Compra {p.cost != null ? money(p.cost) : "—"} ·
+          Venta {money(p.price)}
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-3 sm:justify-end">
+        {tracked ? (
+          <span
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums",
+              low
+                ? "bg-[color-mix(in_srgb,var(--destructive)_12%,transparent)] text-[var(--destructive)]"
+                : "bg-background-muted text-foreground",
+            )}
+          >
+            {p.stockQty} {p.stockQty === 1 ? "ud." : "uds."}
+            {low ? ` · mín. ${p.minStock}` : ""}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">Sin control de stock</span>
+        )}
+        {editable && (
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" onClick={onReceive}>
+              <PackagePlus strokeWidth={1.5} />
+              Entrada
+            </Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onEdit} aria-label={`Editar ${p.name}`}>
+              <Pencil strokeWidth={1.5} className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 text-[var(--destructive)]"
+              onClick={onDelete}
+              aria-label={`Eliminar ${p.name}`}
+            >
+              <Trash2 strokeWidth={1.5} className="h-4 w-4" />
+            </Button>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="s-loc">Ubicación</Label>
-            <Input
-              id="s-loc"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Estante A-3"
-              maxLength={60}
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button onClick={submit}>Guardar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        )}
+      </div>
+    </li>
   );
 }
 
-// ── Ajuste rápido (entrada / salida) ───────────────────────────────────────
-
-function AdjustDialog({
+function ReceiveDialog({
   part,
-  tenantId,
-  currency,
-  onOpenChange,
-  onSaved,
+  onClose,
+  onSave,
 }: {
   part: Part | null;
-  tenantId: string;
-  currency: string;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
+  onClose: () => void;
+  onSave: (qty: number) => void;
 }) {
-  const [amount, setAmount] = useState("1");
-
-  if (!part) return null;
-
-  const qty = Math.max(1, Math.round(Number(amount) || 0));
-
-  const apply = (sign: 1 | -1) => {
-    adjustStock(tenantId, part.id, sign * qty);
-    toast.success(sign > 0 ? "Entrada registrada" : "Salida registrada");
-    onSaved();
-  };
-
+  const [qty, setQty] = useState("1");
+  const n = Math.round(Number(qty.replace(",", ".")) || 0);
   return (
-    <Dialog open={!!part} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+    <Dialog
+      open={!!part}
+      onOpenChange={(o) => {
+        if (!o) {
+          onClose();
+          setQty("1");
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Ajustar stock</DialogTitle>
+          <DialogTitle>Entrada de {part?.name}</DialogTitle>
           <DialogDescription>
-            {part.name} · {formatCurrency(part.price, currency)}
+            ¿Cuántas unidades han llegado? Ahora hay {part?.stockQty ?? 0}.
           </DialogDescription>
         </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-lg border border-border bg-background-subtle px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Stock actual</span>
-            <span className="font-semibold tabular-nums text-foreground">
-              {part.stockQty ?? 0}
-            </span>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="a-qty">Cantidad</Label>
-            <Input
-              id="a-qty"
-              type="number"
-              min={1}
-              step="1"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="in-qty">Unidades</Label>
+          <Input
+            id="in-qty"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            autoFocus
+          />
         </div>
-
-        <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
-          <Button variant="outline" onClick={() => apply(-1)}>
-            <Minus strokeWidth={1.5} />
-            Salida
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
           </Button>
-          <Button onClick={() => apply(1)}>
-            <Plus strokeWidth={1.5} />
-            Entrada
+          <Button
+            disabled={n <= 0}
+            onClick={() => {
+              onSave(n);
+              setQty("1");
+            }}
+          >
+            Añadir {n > 0 ? n : ""}
           </Button>
         </DialogFooter>
       </DialogContent>
