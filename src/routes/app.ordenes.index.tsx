@@ -2,7 +2,7 @@
 // buscador por matrícula/cliente/código. Tarjetas en móvil, tabla en escritorio.
 
 import { useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Plus, Search, ClipboardList, List, Columns3 } from "lucide-react";
 import { PageHeader } from "@/components/base/PageHeader";
 import { EmptyState } from "@/components/base/EmptyState";
@@ -43,6 +43,7 @@ interface Enriched {
 }
 
 function OrdersPage() {
+  const navigate = useNavigate();
   const { ready, tenant } = useAuth();
   const [view, setView] = useState<"list" | "board">("list");
   const [query, setQuery] = useState("");
@@ -90,6 +91,11 @@ function OrdersPage() {
 
   const move = (e: Enriched, next: WorkOrderStatus) => {
     changeOrderStatus(tenant, e.order, next);
+    // Key moments → open the car to offer the WhatsApp message.
+    if (next === "listo" || next === "entregado") {
+      navigate({ to: "/app/ordenes/$id", params: { id: e.order.id }, search: { avisar: next } });
+      return;
+    }
     setVersion((v) => v + 1);
   };
 
@@ -180,7 +186,9 @@ function OrdersPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         tenant={tenant}
-        onCreated={() => setVersion((v) => v + 1)}
+        onCreated={(order) =>
+          navigate({ to: "/app/ordenes/$id", params: { id: order.id }, search: { avisar: "recibido" } })
+        }
       />
     </div>
   );
