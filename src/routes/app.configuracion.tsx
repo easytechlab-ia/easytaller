@@ -136,6 +136,10 @@ function ConfigPage() {
   const [rate, setRate] = useState(
     String(tenant ? laborRate(tenant) : DEFAULT_LABOR_RATE).replace(".", ","),
   );
+  const [diag, setDiag] = useState(
+    tenant?.diagnosisPrice ? String(tenant.diagnosisPrice).replace(".", ",") : "",
+  );
+  const [diagWaived, setDiagWaived] = useState(!!tenant?.diagnosisWaived);
   const [accentColor] = useState(tenant?.accentColor ?? "#1877d6");
   const [logoUrl, setLogoUrl] = useState<string | undefined>(tenant?.logoUrl);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(
@@ -194,6 +198,8 @@ function ConfigPage() {
       currency,
       taxRate,
       laborRate: hourly,
+      diagnosisPrice: Math.max(0, Number(diag.replace(",", ".")) || 0) || undefined,
+      diagnosisWaived: diagWaived,
       accentColor,
       logoUrl,
       googleReviewUrl: googleReviewUrl.trim() || undefined,
@@ -302,6 +308,26 @@ function ConfigPage() {
               />
             </Field>
           </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Diagnóstico (€, sin IVA)">
+              <Input
+                inputMode="decimal"
+                value={diag}
+                onChange={(e) => setDiag(e.target.value)}
+                placeholder="Vacío = no se cobra"
+              />
+            </Field>
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border-subtle px-3 py-2 sm:col-span-2 sm:self-end">
+              <span className="text-sm text-foreground">
+                Se descuenta si el cliente acepta la reparación
+              </span>
+              <Switch checked={diagWaived} onCheckedChange={setDiagWaived} />
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            El diagnóstico entra solo como primera línea de cada presupuesto. Si el cliente no
+            hace la reparación, es lo que paga.
+          </p>
         </Section>
 
         <Section title="Marca" description="Logotipo del taller.">

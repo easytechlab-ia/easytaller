@@ -4,6 +4,7 @@
 
 import type { QuoteItem, Tenant, WorkOrder } from "@/types";
 import {
+  partsRepo,
   uid,
   vehiclesRepo,
   workOrdersRepo,
@@ -21,6 +22,8 @@ export interface QuoteItemInput {
   warrantyMonths?: number;
   warrantyKm?: number;
   partId?: string;
+  diagnosis?: boolean;
+  needsPrice?: boolean;
 }
 
 /** Per-line amount = qty × unitPrice. */
@@ -72,6 +75,8 @@ export function addQuoteItem(
     warrantyKm: input.warrantyKm,
     // Only part lines carry a partId (custom lines never do).
     partId: input.type === "part" ? input.partId : undefined,
+    diagnosis: input.diagnosis || undefined,
+    needsPrice: input.needsPrice || undefined,
   };
   return workOrdersRepo.update(tenantId, order.id, {
     items: [...order.items, item],
@@ -207,7 +212,8 @@ export function confirmQuoteApproval(
   });
   if (!updated) return undefined;
 
-  const anyApproved = items.some((i) => i.approval === "approved");
+  // The diagnosis fee alone doesn't mean the repair was approved.
+  const anyApproved = items.some((i) => i.approval === "approved" && !i.diagnosis);
   if (anyApproved && order.status === "presupuesto_enviado") {
     updated = changeOrderStatus(tenant, updated, "aprobado") ?? updated;
   }
@@ -271,7 +277,8 @@ export function quoteSentDate(order: WorkOrder): string | undefined {
 
 export function quoteStage(order: WorkOrder): QuoteStage | null {
   if (order.items.length === 0) return null;
-  const s = quoteSummary(order.items);
+  // The diagnosis fee doesn't count as an accepted repair.
+  const s = quoteSummary(order.items.filter((i) => !i.diagnosis || i.approval === "pending"));
   if (s.pending > 0) {
     const sentAt = quoteSentDate(order);
     const answeredAt = order.quoteApproval?.decidedAt;
@@ -307,6 +314,8 @@ export function addQuoteItems(
     warrantyMonths: input.warrantyMonths,
     warrantyKm: input.warrantyKm,
     partId: input.type === "part" ? input.partId : undefined,
+    diagnosis: input.diagnosis || undefined,
+    needsPrice: input.needsPrice || undefined,
   }));
   return workOrdersRepo.update(tenantId, order.id, {
     items: [...order.items, ...items],
@@ -340,16 +349,74 @@ export function acceptQuote(
   const decisions: Record<string, ApprovalDecision> = {};
   for (const it of order.items) {
     if (it.approval !== "pending") continue;
-    decisions[it.id] = excluded.includes(it.id) ? "rejected" : "approved";
+    decisions[it.id] = !it.diagnosis && excluded.includes(it.id) ? "rejected" : "approved";
   }
-  return confirmQuoteApproval(tenant, order, decisions, signature);
+  // Diagnosis "free if you repair with us": waive it when something is accepted.
+  let current = order;
+  const repairs = order.items.some((i) => !i.diagnosis && decisions[i.id] === "approved");
+  if (tenant.diagnosisWaived && repairs) {
+    current =
+      workOrdersRepo.update(tenant.id, order.id, {
+        items: order.items.map((it) =>
+          it.diagnosis && it.approval === "pending"
+            ? { ...it, unitPrice: 0, description: "Diagnóstico (descontado al hacer la reparación)" }
+            : it,
+        ),
+      }) ?? order;
+  }
+  return confirmQuoteApproval(tenant, current, decisions, signature);
 }
 
 /** The customer says no to the whole quote (no signature needed). */
 export function rejectQuote(tenant: Tenant, order: WorkOrder): WorkOrder | undefined {
   const decisions: Record<string, ApprovalDecision> = {};
   for (const it of order.items) {
-    if (it.approval === "pending") decisions[it.id] = "rejected";
+    // The diagnosis is still charged when the repair is declined.
+    if (it.approval === "pending") decisions[it.id] = it.diagnosis ? "approved" : "rejected";
   }
   return confirmQuoteApproval(tenant, order, decisions, "");
+}
+
+/** The diagnosis line to start a quote with, if the shop charges one. */
+export function diagnosisLine(tenant: Tenant, order: WorkOrder): QuoteItemInput[] {
+  const price = tenant.diagnosisPrice ?? 0;
+  if (price <= 0 || order.items.some((i) => i.diagnosis)) return [];
+  return [{ type: "labor", description: "Diagnóstico", qty: 1, unitPrice: price, diagnosis: true }];
+}
+
+/**
+ * Lines the customer would pay with their current choice: the pending lines
+ * they kept plus what was already approved. A waived diagnosis drops out as
+ * soon as they keep any repair line.
+ */
+export function chosenLines(tenant: Tenant, items: QuoteItem[], excluded: string[]): QuoteItem[] {
+  const chosen = items.filter(
+    (i) => i.approval === "approved" || (i.approval === "pending" && !excluded.includes(i.id)),
+  );
+  const repairs = chosen.some((i) => !i.diagnosis);
+  return tenant.diagnosisWaived && repairs ? chosen.filter((i) => !i.diagnosis) : chosen;
+}
+
+export interface StockShortage {
+  partId: string;
+  name: string;
+  need: number;
+  have: number;
+  supplier?: string;
+}
+
+/** Catalog parts in this quote with not enough units in stock. */
+export function quoteStockShortages(tenantId: string, items: QuoteItem[]): StockShortage[] {
+  const need = new Map<string, number>();
+  for (const it of items) {
+    if (it.type !== "part" || !it.partId || it.approval === "rejected") continue;
+    need.set(it.partId, (need.get(it.partId) ?? 0) + it.qty);
+  }
+  const out: StockShortage[] = [];
+  for (const [partId, qty] of need) {
+    const part = partsRepo.getById(tenantId, partId);
+    if (!part || part.stockQty == null || part.stockQty >= qty) continue;
+    out.push({ partId, name: part.name, need: qty, have: part.stockQty, supplier: part.supplier });
+  }
+  return out;
 }

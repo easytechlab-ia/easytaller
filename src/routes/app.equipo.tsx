@@ -34,7 +34,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { TeamMemberFormDialog } from "@/components/app/TeamMemberFormDialog";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { usersRepo } from "@/lib/db";
+import { tenantsRepo, usersRepo } from "@/lib/db";
+import { Switch } from "@/components/ui/switch";
 import {
   ROLE_LABELS,
   countActiveOwners,
@@ -51,7 +52,7 @@ export const Route = createFileRoute("/app/equipo")({
 });
 
 function TeamPage() {
-  const { user, tenant, login } = useAuth();
+  const { user, tenant, login, refresh } = useAuth();
   const navigate = useNavigate();
   const [version, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
@@ -268,6 +269,49 @@ function TeamPage() {
         member={editing}
         onSaved={bump}
       />
+
+      {/* What a mechanic may do with quotes */}
+      <section className="mt-6 rounded-xl border border-border bg-card p-5">
+        <h2 className="text-base font-semibold text-foreground">Permisos del mecánico</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Recepción y el dueño siempre pueden hacer y enviar presupuestos.
+        </p>
+        <div className="mt-4 space-y-2">
+          {(
+            [
+              [
+                "mechanicCanAddLines",
+                "Puede añadir trabajos y recambios al presupuesto",
+                "Si encuentra algo más, lo apunta él mismo. El precio sale solo del catálogo.",
+              ],
+              [
+                "mechanicCanSeePrices",
+                "Puede ver los precios",
+                "Si no, añade las líneas sin ver importes y no puede enviar el presupuesto.",
+              ],
+            ] as const
+          ).map(([key, label, help]) => (
+            <label
+              key={key}
+              className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border px-3 py-3"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-foreground">{label}</span>
+                <span className="block text-xs text-muted-foreground">{help}</span>
+              </span>
+              <Switch
+                checked={!!tenant[key]}
+                onCheckedChange={(v) => {
+                  tenantsRepo.update(tenant.id, { [key]: v });
+                  refresh();
+                  toast.success("Permisos guardados");
+                }}
+                aria-label={label}
+              />
+            </label>
+          ))}
+        </div>
+      </section>
 
       <AlertDialog
         open={!!toDelete}

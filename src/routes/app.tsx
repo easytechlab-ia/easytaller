@@ -34,6 +34,7 @@ import { evaluateDocumentExpiries } from "@/lib/documents";
 import { evaluateLowStock } from "@/lib/stock";
 import { cn } from "@/lib/utils";
 import { IS_DEMO } from "@/lib/mode";
+import { ROLE_LABELS, listTeam } from "@/lib/team";
 import { accentVars, useAccentOnRoot } from "@/lib/colors";
 import {
   Sheet,
@@ -73,7 +74,7 @@ const BOTTOM = [
 const BOTTOM_PATHS = new Set<string>(BOTTOM.map((b) => b.to));
 
 function AppLayout() {
-  const { ready, user, tenant, logout } = useAuth();
+  const { ready, user, tenant, logout, login } = useAuth();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [moreOpen, setMoreOpen] = useState(false);
@@ -212,6 +213,28 @@ function AppLayout() {
           </div>
         </header>
 
+
+        {/* Demo: viewing the app as another role → one tap back to the owner */}
+        {IS_DEMO && user.role !== "owner" && (() => {
+          const owner = listTeam(tenant.id).find((m) => m.role === "owner" && m.active !== false);
+          return owner ? (
+            <div className="flex items-center justify-between gap-3 border-b border-border bg-brand-soft px-4 py-2 text-sm text-foreground">
+              <span className="min-w-0 truncate">
+                Estás viendo la app como <strong>{user.name}</strong> ({ROLE_LABELS[user.role]})
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  login(owner);
+                  navigate({ to: "/app" });
+                }}
+                className="shrink-0 font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Volver al dueño
+              </button>
+            </div>
+          ) : null;
+        })()}
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 sm:px-6 md:pb-8">
           <Outlet />
