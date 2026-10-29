@@ -251,6 +251,13 @@ export function QuoteEditor({
             <span>Total</span>
             <span className="tabular-nums">{money(totals.total)}</span>
           </div>
+          {/* What the customer accepted: what to charge */}
+          {order.quoteApproval && accepted.total !== totals.total && (
+            <div className="flex items-center justify-between text-base font-semibold text-[var(--success)]">
+              <span>Total aceptado (a cobrar)</span>
+              <span className="tabular-nums">{money(accepted.total)}</span>
+            </div>
+          )}
         </div>
       )}
 
