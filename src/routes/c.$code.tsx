@@ -31,12 +31,8 @@ import {
   listOrdersByVehicleId,
   quoteTotals,
 } from "@/lib/orders";
-import {
-  approvedTotals,
-  confirmQuoteApproval,
-  warrantyLabel,
-  type ApprovalDecision,
-} from "@/lib/quotes";
+import { acceptQuote, quoteBreakdown, rejectQuote, warrantyLabel } from "@/lib/quotes";
+import { QuotePrintDialog } from "@/components/app/QuoteDocument";
 import { getInvoiceByWorkOrderId } from "@/lib/invoices";
 import { createReview, getReviewByOrderId } from "@/lib/reviews";
 import { inspectionSummary } from "@/lib/inspection";
@@ -242,19 +238,15 @@ function GuestView() {
           </ol>
         </section>
 
+        {/* Quote — accept (or not) and sign */}
+        <QuoteSection order={order} tenant={tenant} vehicle={vehicle} onChanged={load} />
+
         {/* Photos — real gallery, read only */}
         <PhotoGallery photos={photos} />
 
         {/* Inspection (DVI) — read only */}
         <InspectionSection order={order} />
 
-        {/* Quote — approval with signature */}
-        <QuoteSection
-          order={order}
-          tenant={tenant}
-          accent={tenant.accentColor}
-          onChanged={load}
-        />
 
         {/* Invoice for this order (read only, printable) */}
         <OrderInvoiceSection order={order} tenant={tenant} vehicle={vehicle} />
@@ -505,51 +497,29 @@ function SummaryTile({
 
 /* ----------------------------- Quote approval ----------------------------- */
 
+/**
+ * The customer's side of the quote: everything is included by default; they
+ * untick what they don't want, see the total change, and accept with their
+ * finger. Or they say no to the whole repair.
+ */
 function QuoteSection({
   order,
   tenant,
-  accent,
+  vehicle,
   onChanged,
 }: {
   order: WorkOrder;
   tenant: Tenant;
-  accent: string;
+  vehicle?: Vehicle;
   onChanged: () => void;
 }) {
-  const [decisions, setDecisions] = useState<Record<string, ApprovalDecision>>(
-    {},
-  );
+  const [excluded, setExcluded] = useState<string[]>([]);
   const [signOpen, setSignOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [signature, setSignature] = useState<string | undefined>();
 
   const items = order.items;
-  const pending = items.filter((i) => i.approval === "pending");
-  const decided = items.filter((i) => i.approval !== "pending");
-  const totals = quoteTotals(items, tenant.taxRate);
-  const approved = approvedTotals(items, tenant.taxRate, decisions);
-  const taxPct = Math.round(tenant.taxRate * 100);
-
-  const allDecided = pending.every((i) => decisions[i.id]);
-
-  const setDecision = (id: string, d: ApprovalDecision) =>
-    setDecisions((prev) => ({
-      ...prev,
-      [id]: prev[id] === d ? prev[id] : d,
-    }));
-
-  const confirm = () => {
-    if (!signature) {
-      toast.error("Firma para confirmar tu decisión.");
-      return;
-    }
-    confirmQuoteApproval(tenant, order, decisions, signature);
-    setSignOpen(false);
-    setSignature(undefined);
-    setDecisions({});
-    toast.success("Decisión registrada");
-    onChanged();
-  };
-
   if (items.length === 0) {
     return (
       <section className="rounded-xl border border-border bg-card p-5">
@@ -564,224 +534,234 @@ function QuoteSection({
     );
   }
 
-  return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <FileText strokeWidth={1.5} className="h-4 w-4" />
-        <h2 className="text-sm font-semibold text-foreground">Presupuesto</h2>
-      </div>
+  const deciding = items.some((i) => i.approval === "pending");
+  const counted = items.filter(
+    (i) => i.approval === "approved" || (i.approval === "pending" && !excluded.includes(i.id)),
+  );
+  const t = quoteBreakdown(counted, tenant.taxRate);
+  const money = (n: number) => formatCurrencyCents(n, tenant.currency);
+  const nothingChosen = deciding && counted.length === 0;
+  const customer = customersRepo.getById(tenant.id, order.customerId);
 
-      {/* Decided lines (read only) */}
-      {decided.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {decided.map((it) => (
-            <QuoteLine key={it.id} item={it} currency={tenant.currency}>
-              <ApprovalTag approval={it.approval} />
-            </QuoteLine>
-          ))}
-        </div>
-      )}
+  const toggle = (id: string) =>
+    setExcluded((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-      {/* Pending lines (actionable) */}
-      {pending.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {pending.map((it) => {
-            const choice = decisions[it.id];
-            return (
-              <QuoteLine key={it.id} item={it} currency={tenant.currency}>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDecision(it.id, "approved")}
-                    aria-pressed={choice === "approved"}
-                    className={cn(
-                      "flex h-10 items-center justify-center gap-1.5 rounded-md border text-sm font-medium transition-colors",
-                      choice === "approved"
-                        ? "text-[color:var(--c)]"
-                        : "border-border text-muted-foreground hover:bg-background-muted",
-                    )}
-                    style={
-                      choice === "approved"
-                        ? ({
-                            borderColor: "var(--success)",
-                            backgroundColor:
-                              "color-mix(in oklab, var(--success) 12%, transparent)",
-                            "--c": "var(--success)",
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                  >
-                    <Check strokeWidth={1.5} className="h-4 w-4" />
-                    Aprobar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecision(it.id, "rejected")}
-                    aria-pressed={choice === "rejected"}
-                    className={cn(
-                      "flex h-10 items-center justify-center gap-1.5 rounded-md border text-sm font-medium transition-colors",
-                      choice === "rejected"
-                        ? "text-[color:var(--c)]"
-                        : "border-border text-muted-foreground hover:bg-background-muted",
-                    )}
-                    style={
-                      choice === "rejected"
-                        ? ({
-                            borderColor: "var(--destructive)",
-                            backgroundColor:
-                              "color-mix(in oklab, var(--destructive) 12%, transparent)",
-                            "--c": "var(--destructive)",
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                  >
-                    <X strokeWidth={1.5} className="h-4 w-4" />
-                    Rechazar
-                  </button>
-                </div>
-              </QuoteLine>
-            );
-          })}
-        </div>
-      )}
+  const accept = () => {
+    if (!signature) {
+      toast.error("Firma con el dedo para aceptar.");
+      return;
+    }
+    acceptQuote(tenant, order, excluded, signature);
+    setSignOpen(false);
+    setSignature(undefined);
+    setExcluded([]);
+    toast.success("¡Presupuesto aceptado! El taller ya lo tiene.");
+    onChanged();
+  };
 
-      {/* Totals */}
-      <div className="mt-4 space-y-1 border-t border-border pt-3 text-sm">
-        <Row
-          label="Subtotal"
-          value={formatCurrencyCents(totals.subtotal, tenant.currency)}
-        />
-        <Row
-          label={`IVA (${taxPct}%)`}
-          value={formatCurrencyCents(totals.tax, tenant.currency)}
-        />
-        <div className="flex items-center justify-between pt-1 text-base font-semibold text-foreground">
-          <span>Total</span>
-          <span>{formatCurrencyCents(totals.total, tenant.currency)}</span>
-        </div>
-        <div className="flex items-center justify-between pt-1 text-sm">
-          <span className="text-muted-foreground">Total aprobado</span>
-          <span className="font-medium" style={{ color: "var(--success)" }}>
-            {formatCurrencyCents(approved.total, tenant.currency)}
+  const reject = () => {
+    rejectQuote(tenant, order);
+    setRejectOpen(false);
+    toast.success("Le hemos dicho al taller que no quieres la reparación.");
+    onChanged();
+  };
+
+  const block = (kind: QuoteItem["type"]) => {
+    const lines = items.filter((i) => i.type === kind);
+    if (lines.length === 0) return null;
+    return (
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>{kind === "labor" ? "Mano de obra" : "Recambios"}</span>
+          <span className="tabular-nums text-foreground">
+            {money(kind === "labor" ? t.labor : t.parts)}
           </span>
         </div>
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {lines.map((it) => {
+            const pending = it.approval === "pending";
+            const on = pending ? !excluded.includes(it.id) : it.approval === "approved";
+            const warranty = warrantyLabel(it);
+            const detail =
+              kind === "labor"
+                ? `${it.qty.toLocaleString("es-ES", { maximumFractionDigits: 2 })} h × ${money(it.unitPrice)}/h`
+                : `${it.qty} × ${money(it.unitPrice)}`;
+            const body = (
+              <>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-sm text-foreground", !on && "text-muted-foreground line-through")}>
+                    {it.description}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {detail}
+                    {warranty ? ` · Garantía ${warranty}` : ""}
+                    {!pending && (it.approval === "approved" ? " · Aceptado" : " · No lo quieres")}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 text-sm font-medium tabular-nums",
+                    on ? "text-foreground" : "text-muted-foreground line-through",
+                  )}
+                >
+                  {money(it.qty * it.unitPrice)}
+                </span>
+              </>
+            );
+            return (
+              <li key={it.id}>
+                {pending ? (
+                  <label className="flex cursor-pointer items-center gap-3 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(it.id)}
+                      className="h-5 w-5 shrink-0 accent-[var(--brand-accent)]"
+                      aria-label={`Incluir ${it.description}`}
+                    />
+                    {body}
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-3 px-3 py-3">{body}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  };
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <FileText strokeWidth={1.5} className="h-4 w-4" />
+          <h2 className="text-sm font-semibold text-foreground">Presupuesto</h2>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setPdfOpen(true)}>
+          <Printer strokeWidth={1.5} />
+          PDF
+        </Button>
       </div>
 
-      {/* Action / final state */}
-      {pending.length > 0 ? (
-        <Button
-          className="mt-4 w-full text-primary-foreground"
-          style={{ backgroundColor: accent }}
-          disabled={!allDecided}
-          onClick={() => setSignOpen(true)}
-        >
-          <PenLine strokeWidth={1.5} />
-          Confirmar y firmar
-        </Button>
+      {deciding && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Esto es lo que vamos a hacer. Si hay algo que no quieres, desmárcalo y el total se
+          actualiza. Precios sin IVA; el IVA se suma abajo.
+        </p>
+      )}
+
+      {block("labor")}
+      {block("part")}
+
+      <div className="mt-4 space-y-1 border-t border-border pt-3 text-sm">
+        <Row label="Base imponible" value={money(t.subtotal)} />
+        <Row label={`IVA (${Math.round(tenant.taxRate * 100)}%)`} value={money(t.tax)} />
+        <div className="flex items-center justify-between pt-1 text-lg font-bold text-foreground">
+          <span>{deciding ? "Total" : "Total aceptado"}</span>
+          <span className="tabular-nums">{money(t.total)}</span>
+        </div>
+      </div>
+
+      {deciding ? (
+        <div className="mt-4 space-y-2">
+          {nothingChosen ? (
+            <Button variant="outline" className="h-12 w-full" onClick={() => setRejectOpen(true)}>
+              No quiero hacer la reparación
+            </Button>
+          ) : (
+            <>
+              <Button className="h-12 w-full text-base" onClick={() => setSignOpen(true)}>
+                <PenLine strokeWidth={1.5} />
+                Aceptar y firmar · {money(t.total)}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setRejectOpen(true)}
+                className="w-full py-1 text-center text-sm text-muted-foreground underline-offset-2 hover:underline"
+              >
+                No quiero hacer la reparación
+              </button>
+            </>
+          )}
+        </div>
       ) : order.quoteApproval ? (
         <div className="mt-4 rounded-lg border border-border bg-background-subtle p-4">
-          <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-            <Check strokeWidth={1.5} className="h-4 w-4" style={{ color: "var(--success)" }} />
-            Presupuesto firmado el {formatDate(order.quoteApproval.decidedAt)}
-          </p>
-          <img
-            src={order.quoteApproval.signature}
-            alt="Firma de aprobación"
-            className="mt-3 w-full max-w-[220px] rounded-md border border-border bg-background"
-          />
+          {counted.length > 0 ? (
+            <>
+              <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                <Check strokeWidth={2} className="h-4 w-4" style={{ color: "var(--success)" }} />
+                Aceptaste el presupuesto el {formatDate(order.quoteApproval.decidedAt)}
+              </p>
+              {order.quoteApproval.signature && (
+                <img
+                  src={order.quoteApproval.signature}
+                  alt="Tu firma"
+                  className="mt-3 w-full max-w-[220px] rounded-md border border-border bg-background"
+                />
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-foreground">
+              Dijiste que no a este presupuesto el {formatDate(order.quoteApproval.decidedAt)}. Si
+              cambias de idea, escribe al taller.
+            </p>
+          )}
         </div>
       ) : null}
 
-      {/* Signature dialog */}
+      {/* Sign */}
       <Dialog open={signOpen} onOpenChange={setSignOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Firma tu decisión</DialogTitle>
+            <DialogTitle>Firma para aceptar</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Aprobado: {formatCurrencyCents(approved.total, tenant.currency)}. Firma
-            para confirmar.
+            Aceptas el presupuesto por {money(t.total)} (IVA incluido). Firma con el dedo aquí
+            debajo.
           </p>
           <SignaturePad initial={signature} onChange={setSignature} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setSignOpen(false)}>
               Cancelar
             </Button>
-            <Button
-              className="text-primary-foreground"
-              style={{ backgroundColor: accent }}
-              onClick={confirm}
-              disabled={!signature}
-            >
-              Confirmar
+            <Button onClick={accept} disabled={!signature}>
+              Aceptar presupuesto
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
-  );
-}
 
-function QuoteLine({
-  item,
-  currency,
-  children,
-}: {
-  item: QuoteItem;
-  currency: string;
-  children?: React.ReactNode;
-}) {
-  const warranty = warrantyLabel(item);
-  return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-foreground">{item.description}</p>
-          <p className="text-xs text-muted-foreground">
-            {item.qty} × {formatCurrencyCents(item.unitPrice, currency)}
+      {/* Say no */}
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>¿No quieres hacer la reparación?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Avisaremos al taller. Si tienes dudas, también puedes escribirles abajo antes de decidir.
           </p>
-          {warranty && (
-            <span className="mt-1 inline-flex items-center gap-1 rounded-md border border-border bg-background-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              <ShieldCheck strokeWidth={1.5} className="h-3 w-3" />
-              Garantía {warranty}
-            </span>
-          )}
-        </div>
-        <span className="shrink-0 text-sm font-medium text-foreground">
-          {formatCurrencyCents(item.qty * item.unitPrice, currency)}
-        </span>
-      </div>
-      {children}
-    </div>
-  );
-}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>
+              Volver
+            </Button>
+            <Button variant="destructive" onClick={reject}>
+              No la quiero
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-function ApprovalTag({ approval }: { approval: QuoteItem["approval"] }) {
-  if (approval === "approved") {
-    return (
-      <span
-        className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium"
-        style={{
-          color: "var(--success)",
-          backgroundColor: "color-mix(in oklab, var(--success) 12%, transparent)",
-        }}
-      >
-        <Check strokeWidth={1.5} className="h-3.5 w-3.5" />
-        Aprobado
-      </span>
-    );
-  }
-  return (
-    <span
-      className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium"
-      style={{
-        color: "var(--destructive)",
-        backgroundColor: "color-mix(in oklab, var(--destructive) 12%, transparent)",
-      }}
-    >
-      <X strokeWidth={1.5} className="h-3.5 w-3.5" />
-      Rechazado
-    </span>
+      <QuotePrintDialog
+        open={pdfOpen}
+        onOpenChange={setPdfOpen}
+        order={order}
+        tenant={tenant}
+        customer={customer}
+        vehicle={vehicle}
+      />
+    </section>
   );
 }
 
@@ -789,7 +769,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between text-muted-foreground">
       <span>{label}</span>
-      <span>{value}</span>
+      <span className="tabular-nums">{value}</span>
     </div>
   );
 }
