@@ -77,6 +77,7 @@ const DEFAULT_SERVICE_DESCRIPTIONS: Record<string, string> = {
   "Alineación y equilibrado": "Menos desgaste de neumáticos y una conducción más estable.",
   "Cambio de batería": "Comprobamos la carga y cambiamos la batería en el momento.",
   "Distribución (correa)": "Correa, tensores y bomba de agua cuando toca.",
+  "Cambio de pastillas delanteras": "Pastillas nuevas y comprobación de discos.",
 };
 
 export function defaultWebsiteSettings(tenant: Tenant): WebsiteSettings {

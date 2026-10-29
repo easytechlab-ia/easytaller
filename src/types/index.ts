@@ -36,6 +36,7 @@ export interface Tenant {
   status: "active" | "suspended";
   currency: string; // e.g. 'EUR'
   taxRate: number; // e.g. 0.21
+  laborRate?: number; // labor price per hour, without IVA (e.g. 45)
   locations: Location[];
   createdAt: string;
   // Configuration (set from /app/configuracion). All optional.
@@ -287,6 +288,9 @@ export interface WorkOrder {
   quoteApproval?: { signature: string; decidedAt: string };
   // When the quote was last sent to the customer (for "waiting X days").
   quoteSentAt?: string;
+  // When the approved parts were taken out of stock (on "Listo"), so it only
+  // happens once.
+  stockUsedAt?: string;
   estimatedReadyAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -339,16 +343,27 @@ export interface Service {
   id: string;
   tenantId: string;
   name: string;
+  // Price shown on the website, IVA included. Computed from the labor hours ×
+  // the shop's hourly rate + the parts it usually needs (see lib/catalog).
   basePrice: number;
-  estimatedMinutes: number;
+  estimatedMinutes: number; // agenda duration
+  laborHours?: number; // labor hours charged in a quote
+  parts?: ServicePart[]; // parts it usually needs
+}
+
+export interface ServicePart {
+  partId: string;
+  qty: number;
 }
 
 export interface Part {
   id: string;
   tenantId: string;
   name: string;
-  price: number;
+  price: number; // sale price, without IVA
   sku?: string;
+  cost?: number; // purchase price, without IVA
+  supplier?: string; // who it's ordered from (name, phone, web… free text)
   // Inventory (Stock module). All optional so existing catalog data is valid.
   stockQty?: number; // current units on hand
   minStock?: number; // minimum desired units; at or below → "bajo stock"

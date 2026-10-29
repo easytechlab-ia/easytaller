@@ -12,16 +12,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { quoteTotals } from "@/lib/orders";
-import { approvedTotals, lineAmount, quoteSentDate, warrantyLabel } from "@/lib/quotes";
+import {
+  approvedTotals,
+  lineAmount,
+  quoteBreakdown,
+  quoteSentDate,
+  warrantyLabel,
+} from "@/lib/quotes";
 import { formatCurrencyCents, formatDate } from "@/lib/format";
 import { printElement } from "@/lib/print";
 import type { Customer, QuoteItem, Tenant, Vehicle, WorkOrder } from "@/types";
-
-const TYPE_LABEL: Record<QuoteItem["type"], string> = {
-  labor: "Mano de obra",
-  part: "Recambio",
-};
 
 const APPROVAL_LABEL: Record<QuoteItem["approval"], string> = {
   pending: "Pendiente",
@@ -46,7 +46,7 @@ export function QuoteDocument({
   vehicle?: Vehicle;
 }) {
   const loc = tenant.locations[0];
-  const totals = quoteTotals(order.items, tenant.taxRate);
+  const totals = quoteBreakdown(order.items, tenant.taxRate);
   const answered = !!order.quoteApproval;
   const accepted = approvedTotals(order.items, tenant.taxRate);
   const date = quoteSentDate(order) ?? new Date().toISOString();
@@ -103,44 +103,68 @@ export function QuoteDocument({
         </p>
       )}
 
-      {/* Lines */}
-      <table className="mt-5 w-full border-collapse">
-        <thead>
-          <tr className="border-b-2 border-slate-200 text-left text-xs text-slate-500">
-            <th className="py-2 pr-2 font-semibold">Concepto</th>
-            <th className="w-12 py-2 pr-2 text-right font-semibold">Cant.</th>
-            <th className="w-24 py-2 pr-2 text-right font-semibold">Precio</th>
-            <th className="w-24 py-2 text-right font-semibold">Importe</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.items.map((it) => {
-            const warranty = warrantyLabel(it);
-            return (
-              <tr
-                key={it.id}
-                className={
-                  it.approval === "rejected"
-                    ? "border-b border-slate-100 align-top text-slate-400 line-through"
-                    : "border-b border-slate-100 align-top"
-                }
-              >
-                <td className="py-2 pr-2">
-                  <p className="text-slate-900">{it.description}</p>
-                  <p className="text-xs text-slate-500">
-                    {TYPE_LABEL[it.type]}
-                    {warranty ? ` · Garantía ${warranty}` : ""}
-                    {answered ? ` · ${APPROVAL_LABEL[it.approval]}` : ""}
-                  </p>
-                </td>
-                <td className="py-2 pr-2 text-right tabular-nums">{it.qty}</td>
-                <td className="py-2 pr-2 text-right tabular-nums">{money(it.unitPrice)}</td>
-                <td className="py-2 text-right tabular-nums">{money(lineAmount(it))}</td>
+      {/* Lines: labor and parts, each with its subtotal */}
+      {(["labor", "part"] as const).map((kind) => {
+        const lines = order.items.filter((it) => it.type === kind);
+        if (lines.length === 0) return null;
+        return (
+          <table key={kind} className="mt-5 w-full border-collapse">
+            <thead>
+              <tr className="border-b-2 border-slate-200 text-left text-xs text-slate-500">
+                <th className="py-2 pr-2 font-semibold">
+                  {kind === "labor" ? "Mano de obra" : "Recambios"}
+                </th>
+                <th className="w-20 py-2 pr-2 text-right font-semibold">
+                  {kind === "labor" ? "Horas" : "Cant."}
+                </th>
+                <th className="w-24 py-2 pr-2 text-right font-semibold">
+                  {kind === "labor" ? "€/hora" : "Precio"}
+                </th>
+                <th className="w-24 py-2 text-right font-semibold">Importe</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {lines.map((it) => {
+                const warranty = warrantyLabel(it);
+                const note = [
+                  warranty ? `Garantía ${warranty}` : "",
+                  answered ? APPROVAL_LABEL[it.approval] : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <tr
+                    key={it.id}
+                    className={
+                      it.approval === "rejected"
+                        ? "border-b border-slate-100 align-top text-slate-400 line-through"
+                        : "border-b border-slate-100 align-top"
+                    }
+                  >
+                    <td className="py-2 pr-2">
+                      <p className="text-slate-900">{it.description}</p>
+                      {note && <p className="text-xs text-slate-500">{note}</p>}
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums">
+                      {it.qty.toLocaleString("es-ES", { maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums">{money(it.unitPrice)}</td>
+                    <td className="py-2 text-right tabular-nums">{money(lineAmount(it))}</td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td colSpan={3} className="py-2 pr-2 text-right text-xs font-semibold text-slate-500">
+                  Subtotal {kind === "labor" ? "mano de obra" : "recambios"}
+                </td>
+                <td className="py-2 text-right font-semibold tabular-nums text-slate-900">
+                  {money(kind === "labor" ? totals.labor : totals.parts)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        );
+      })}
 
       {/* Totals */}
       <div className="ml-auto mt-4 w-full max-w-xs space-y-1">
@@ -170,7 +194,7 @@ export function QuoteDocument({
           Presupuesto sin compromiso. Si al desmontar encontramos algo más, te avisamos antes de
           hacer ningún trabajo que no esté aprobado.
         </p>
-        {order.quoteApproval && (
+        {order.quoteApproval?.signature && (
           <div className="text-center">
             <img
               src={order.quoteApproval.signature}

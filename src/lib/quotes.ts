@@ -288,3 +288,68 @@ export function daysSince(iso?: string, now = new Date()): number | undefined {
   const ms = now.getTime() - new Date(iso).getTime();
   return Math.max(0, Math.floor(ms / 86_400_000));
 }
+
+// ---- simple editing / approval -----------------------------------------------
+
+/** Add several lines at once (e.g. all the lines of a service). */
+export function addQuoteItems(
+  tenantId: string,
+  order: WorkOrder,
+  inputs: QuoteItemInput[],
+): WorkOrder | undefined {
+  const items: QuoteItem[] = inputs.map((input) => ({
+    id: uid("qi"),
+    type: input.type,
+    description: input.description.trim(),
+    qty: input.qty,
+    unitPrice: input.unitPrice,
+    approval: "pending",
+    warrantyMonths: input.warrantyMonths,
+    warrantyKm: input.warrantyKm,
+    partId: input.type === "part" ? input.partId : undefined,
+  }));
+  return workOrdersRepo.update(tenantId, order.id, {
+    items: [...order.items, ...items],
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Labor and parts subtotals, base, IVA and total for a set of lines. */
+export function quoteBreakdown(items: QuoteItem[], taxRate: number) {
+  const labor = items
+    .filter((i) => i.type === "labor")
+    .reduce((s, i) => s + lineAmount(i), 0);
+  const parts = items
+    .filter((i) => i.type === "part")
+    .reduce((s, i) => s + lineAmount(i), 0);
+  const subtotal = labor + parts;
+  const tax = subtotal * taxRate;
+  return { labor, parts, subtotal, tax, total: subtotal + tax };
+}
+
+/**
+ * The customer accepts the quote: every pending line is approved except the
+ * ones they unticked (`excluded`), with their signature.
+ */
+export function acceptQuote(
+  tenant: Tenant,
+  order: WorkOrder,
+  excluded: string[],
+  signature: string,
+): WorkOrder | undefined {
+  const decisions: Record<string, ApprovalDecision> = {};
+  for (const it of order.items) {
+    if (it.approval !== "pending") continue;
+    decisions[it.id] = excluded.includes(it.id) ? "rejected" : "approved";
+  }
+  return confirmQuoteApproval(tenant, order, decisions, signature);
+}
+
+/** The customer says no to the whole quote (no signature needed). */
+export function rejectQuote(tenant: Tenant, order: WorkOrder): WorkOrder | undefined {
+  const decisions: Record<string, ApprovalDecision> = {};
+  for (const it of order.items) {
+    if (it.approval === "pending") decisions[it.id] = "rejected";
+  }
+  return confirmQuoteApproval(tenant, order, decisions, "");
+}

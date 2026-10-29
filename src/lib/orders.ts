@@ -18,6 +18,7 @@ import {
   workOrdersRepo,
 } from "@/lib/db";
 import { notify } from "@/lib/notifications";
+import { deductStockForOrder } from "@/lib/stock";
 
 // Customer-facing pipeline (does not include `cancelado`, handled apart).
 export const PIPELINE: WorkOrderStatus[] = [
@@ -201,10 +202,15 @@ export function changeOrderStatus(
     messages.push({ id: uid("m"), from: "shop", text: auto, createdAt: now });
   }
 
+  // Car ready: the approved parts leave the stock (only once per repair).
+  const useStock = next === "listo" && !order.stockUsedAt;
+  if (useStock) deductStockForOrder(tenant.id, order);
+
   const updated = workOrdersRepo.update(tenant.id, order.id, {
     status: next,
     updatedAt: now,
     messages,
+    ...(useStock ? { stockUsedAt: now } : {}),
   });
 
   notify(tenant.id, {

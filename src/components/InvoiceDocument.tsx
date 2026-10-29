@@ -161,44 +161,56 @@ export function InvoiceDocument({
           </div>
         </div>
 
-        {/* Lines */}
-        <div className="py-6">
-          <table className="w-full text-sm">
-            <thead className="border-b border-border text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="pb-2 font-medium">Descripción</th>
-                <th className="pb-2 text-center font-medium">Cant.</th>
-                <th className="pb-2 text-right font-medium">Precio</th>
-                <th className="pb-2 text-right font-medium">Importe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.items.map((it) => (
-                <tr key={it.id} className="border-b border-border-subtle">
-                  <td className="py-2.5 text-foreground">
-                    {it.description}
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {it.type === "labor" ? "Mano de obra" : "Recambio"}
-                    </span>
-                    {warrantyLabel(it) && (
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        Garantía: {warrantyLabel(it)}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2.5 text-center text-muted-foreground">
-                    {it.qty}
-                  </td>
-                  <td className="py-2.5 text-right text-muted-foreground">
-                    {formatCurrencyCents(it.unitPrice, tenant.currency)}
-                  </td>
-                  <td className="py-2.5 text-right text-foreground">
-                    {formatCurrencyCents(it.qty * it.unitPrice, tenant.currency)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Lines: labor and parts, each with its subtotal */}
+        <div className="space-y-6 py-6">
+          {(["labor", "part"] as const).map((kind) => {
+            const lines = invoice.items.filter((it) => it.type === kind);
+            if (lines.length === 0) return null;
+            const subtotal = lines.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
+            return (
+              <table key={kind} className="w-full text-sm">
+                <thead className="border-b border-border text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th className="pb-2 font-medium">{kind === "labor" ? "Mano de obra" : "Recambios"}</th>
+                    <th className="pb-2 text-center font-medium">{kind === "labor" ? "Horas" : "Cant."}</th>
+                    <th className="pb-2 text-right font-medium">{kind === "labor" ? "€/hora" : "Precio"}</th>
+                    <th className="pb-2 text-right font-medium">Importe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((it) => (
+                    <tr key={it.id} className="border-b border-border-subtle">
+                      <td className="py-2.5 text-foreground">
+                        {it.description}
+                        {warrantyLabel(it) && (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            Garantía: {warrantyLabel(it)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 text-center text-muted-foreground">
+                        {it.qty.toLocaleString("es-ES", { maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="py-2.5 text-right text-muted-foreground">
+                        {formatCurrencyCents(it.unitPrice, tenant.currency)}
+                      </td>
+                      <td className="py-2.5 text-right text-foreground">
+                        {formatCurrencyCents(it.qty * it.unitPrice, tenant.currency)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={3} className="pt-2 text-right text-xs font-medium text-muted-foreground">
+                      Subtotal {kind === "labor" ? "mano de obra" : "recambios"}
+                    </td>
+                    <td className="pt-2 text-right font-medium text-foreground">
+                      {formatCurrencyCents(subtotal, tenant.currency)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            );
+          })}
         </div>
 
         {/* Totals */}

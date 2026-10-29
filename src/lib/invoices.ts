@@ -15,7 +15,6 @@ import {
 import { read, write } from "@/lib/db/storage";
 import { notify } from "@/lib/notifications";
 import { quoteTotals } from "@/lib/orders";
-import { decrementStockForInvoice } from "@/lib/stock";
 
 /** Find the billing record of a given work order, if any. */
 export function getInvoiceByWorkOrderId(
@@ -76,9 +75,6 @@ export function generateInvoiceFromOrder(
     status: "pending",
     createdAt: now,
   });
-
-  // Decrement inventory once, for each line linked to a catalog part.
-  decrementStockForInvoice(invoice);
 
   notify(tenant.id, {
     type: "presupuesto",
@@ -199,9 +195,21 @@ function day(iso: string): string {
 export function billingText(tenant: Tenant, row: BillingRow): string {
   const { invoice: inv, customer, vehicle } = row;
   const taxPct = Math.round(tenant.taxRate * 100);
-  const lines = inv.items.map(
-    (it) => `  - ${it.description}: ${it.qty} x ${money(it.unitPrice)} € = ${money(it.qty * it.unitPrice)} €`,
-  );
+  const block = (type: "labor" | "part") =>
+    inv.items
+      .filter((it) => it.type === type)
+      .map(
+        (it) =>
+          `  - ${it.description}: ${it.qty.toLocaleString("es-ES")} ${type === "labor" ? "h" : "ud."} x ${money(it.unitPrice)} € = ${money(it.qty * it.unitPrice)} €`,
+      );
+  const labor = inv.items.filter((i) => i.type === "labor").reduce((s, i) => s + i.qty * i.unitPrice, 0);
+  const parts = inv.items.filter((i) => i.type === "part").reduce((s, i) => s + i.qty * i.unitPrice, 0);
+  const lines = [
+    `Mano de obra (sin IVA): ${money(labor)} €`,
+    ...block("labor"),
+    `Recambios (sin IVA): ${money(parts)} €`,
+    ...block("part"),
+  ];
   const paid =
     inv.status === "paid"
       ? "Cobrado"
@@ -215,7 +223,6 @@ export function billingText(tenant: Tenant, row: BillingRow): string {
     ...(customer?.address?.trim() ? [`Dirección: ${customer.address.trim()}`] : []),
     `Teléfono: ${customer?.phone ?? "—"}${customer?.email ? ` · ${customer.email}` : ""}`,
     `Vehículo: ${vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.plate}` : "—"}`,
-    "Conceptos (precios sin IVA):",
     ...lines,
     `Base imponible: ${money(inv.subtotal)} €`,
     `IVA ${taxPct}%: ${money(inv.tax)} €`,
@@ -254,6 +261,8 @@ export function billingCsv(tenant: Tenant, rows: BillingRow[]): string {
     "Vehículo",
     "Matrícula",
     "Conceptos",
+    "Mano de obra",
+    "Recambios",
     "Base imponible",
     "IVA %",
     "Cuota IVA",
@@ -278,6 +287,8 @@ export function billingCsv(tenant: Tenant, rows: BillingRow[]): string {
       vehicle ? `${vehicle.make} ${vehicle.model}` : "",
       vehicle?.plate,
       inv.items.map((it) => `${it.qty} x ${it.description}`).join(" | "),
+      money(inv.items.filter((i) => i.type === "labor").reduce((s, i) => s + i.qty * i.unitPrice, 0)),
+      money(inv.items.filter((i) => i.type === "part").reduce((s, i) => s + i.qty * i.unitPrice, 0)),
       money(inv.subtotal),
       taxPct,
       money(inv.tax),

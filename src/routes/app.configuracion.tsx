@@ -22,6 +22,7 @@ import {
 import { useAuth } from "@/lib/auth/AuthContext";
 import { tenantsRepo } from "@/lib/db";
 import { compressImage } from "@/lib/image";
+import { DEFAULT_LABOR_RATE, laborRate, refreshServicePrices } from "@/lib/catalog";
 import {
   TOGGLEABLE_MODULES,
   isModuleEnabled,
@@ -53,9 +54,7 @@ const MODULE_INFO: Record<
 > = {
   presupuestos: { label: "Presupuestos", description: "Listado de presupuestos enviados y su aprobación." },
   facturacion: { label: "Facturación", description: "Facturas de las reparaciones entregadas y cobros." },
-  servicios: { label: "Servicios", description: "Catálogo de servicios y precios del taller." },
   equipo: { label: "Equipo", description: "Usuarios del taller y sus permisos." },
-  stock: { label: "Stock", description: "Inventario de repuestos y avisos de bajo stock." },
   mensajes: { label: "Mensajes", description: "Bandeja de chat con los clientes por orden." },
   agentes: { label: "Agentes", description: "Asistente que atiende la bandeja automáticamente. Requiere Mensajes." },
   recordatorios: { label: "Avisos", description: "Recordatorios de ITV, revisiones y vencimientos de documentos." },
@@ -70,6 +69,9 @@ const CORE_MODULE_LABELS = [
   "Clientes",
   "Vehículos",
   "Citas",
+  "Servicios",
+  "Recambios",
+  "Mi web",
   "Configuración",
 ];
 
@@ -133,6 +135,9 @@ function ConfigPage() {
   const [taxPct, setTaxPct] = useState(
     String(Math.round((tenant?.taxRate ?? 0.21) * 100)),
   );
+  const [rate, setRate] = useState(
+    String(tenant ? laborRate(tenant) : DEFAULT_LABOR_RATE).replace(".", ","),
+  );
   const [accentColor] = useState(tenant?.accentColor ?? "#1877d6");
   const [logoUrl, setLogoUrl] = useState<string | undefined>(tenant?.logoUrl);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(
@@ -176,6 +181,7 @@ function ConfigPage() {
     }
     setSaving(true);
     const taxRate = Math.min(100, Math.max(0, Number(taxPct) || 0)) / 100;
+    const hourly = Math.max(0, Number(rate.replace(",", ".")) || 0) || DEFAULT_LABOR_RATE;
     const locations = tenant.locations.map((loc, idx) =>
       idx === 0
         ? { ...loc, address: address.trim() || undefined, phone: phone.trim() || undefined }
@@ -189,6 +195,7 @@ function ConfigPage() {
       phone: phone.trim() || undefined,
       currency,
       taxRate,
+      laborRate: hourly,
       accentColor,
       logoUrl,
       googleReviewUrl: googleReviewUrl.trim() || undefined,
@@ -196,6 +203,8 @@ function ConfigPage() {
       locations,
       enabledModules,
     });
+    // Services' prices depend on the hourly rate and the IVA.
+    refreshServicePrices({ id: tenant.id, laborRate: hourly, taxRate });
     refresh();
     setSaving(false);
     toast.success("Configuración guardada.");
@@ -260,10 +269,17 @@ function ConfigPage() {
         </Section>
 
         <Section
-          title="Moneda e IVA"
-          description="Afecta a presupuestos, facturas y vista de cliente."
+          title="Precios e IVA"
+          description="El precio por hora se usa en todos los presupuestos y en el precio de tus servicios."
         >
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Mano de obra (€/hora, sin IVA)">
+              <Input
+                inputMode="decimal"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+              />
+            </Field>
             <Field label="Moneda">
               <Select value={currency} onValueChange={setCurrency}>
                 <SelectTrigger>

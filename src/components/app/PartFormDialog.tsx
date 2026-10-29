@@ -1,10 +1,12 @@
-// Talleo — create/edit part dialog. All writes go through partsRepo.
+// EasyTaller — create / edit a part (recambio): name, code, supplier, purchase
+// and sale price, and stock (units + minimum). Leaving the minimum empty means
+// its stock isn't tracked. Saving keeps the services' prices up to date.
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -13,145 +15,147 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { partsRepo } from "@/lib/db";
-import type { Part } from "@/types";
-import { toast } from "sonner";
+import { refreshServicePrices } from "@/lib/catalog";
+import type { Part, Tenant } from "@/types";
 
 interface PartFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  tenantId: string;
+  tenant: Tenant;
   part?: Part | null;
   onSaved?: (part: Part) => void;
 }
 
-interface FormState {
-  name: string;
-  price: string;
-  sku: string;
+function num(v: string): number | undefined {
+  if (!v.trim()) return undefined;
+  const n = Number(v.replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
 }
 
-const EMPTY: FormState = { name: "", price: "", sku: "" };
+function str(n?: number): string {
+  return n == null ? "" : String(n).replace(".", ",");
+}
 
-export function PartFormDialog({
-  open,
-  onOpenChange,
-  tenantId,
-  part,
-  onSaved,
-}: PartFormDialogProps) {
-  const [form, setForm] = useState<FormState>(EMPTY);
-  const [errors, setErrors] = useState<Partial<FormState>>({});
+export function PartFormDialog({ open, onOpenChange, tenant, part, onSaved }: PartFormDialogProps) {
+  const [name, setName] = useState("");
+  const [sku, setSku] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const [cost, setCost] = useState("");
+  const [price, setPrice] = useState("");
+  const [stock, setStock] = useState("");
+  const [min, setMin] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    if (part) {
-      setForm({
-        name: part.name,
-        price: String(part.price),
-        sku: part.sku ?? "",
-      });
-    } else {
-      setForm(EMPTY);
-    }
-    setErrors({});
+    setName(part?.name ?? "");
+    setSku(part?.sku ?? "");
+    setSupplier(part?.supplier ?? "");
+    setCost(str(part?.cost));
+    setPrice(str(part?.price));
+    setStock(str(part?.stockQty));
+    setMin(str(part?.minStock));
   }, [open, part]);
 
-  const set = (k: keyof FormState, v: string) =>
-    setForm((f) => ({ ...f, [k]: v }));
+  const costN = num(cost);
+  const priceN = num(price);
+  const margin =
+    costN && priceN && costN > 0 ? Math.round(((priceN - costN) / costN) * 100) : null;
 
-  const submit = () => {
-    const next: Partial<FormState> = {};
-    if (!form.name.trim()) next.name = "El nombre es obligatorio.";
-    const price = Number(form.price);
-    if (form.price === "" || Number.isNaN(price) || price < 0)
-      next.price = "Introduce un precio válido.";
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
-
-    const payload = {
-      name: form.name.trim(),
-      price: Math.round(price),
-      sku: form.sku.trim() || undefined,
-    };
-
-    let saved: Part | undefined;
-    if (part) {
-      saved = partsRepo.update(tenantId, part.id, payload);
-      toast.success("Repuesto actualizado");
-    } else {
-      saved = partsRepo.create(tenantId, {
-        tenantId,
-        ...payload,
-      } as Omit<Part, "id">);
-      toast.success("Repuesto creado");
+  const save = () => {
+    if (!name.trim()) {
+      toast.error("Ponle un nombre al recambio.");
+      return;
     }
-    if (saved) onSaved?.(saved);
+    if (priceN == null || priceN < 0) {
+      toast.error("Indica el precio de venta.");
+      return;
+    }
+    const payload: Partial<Part> = {
+      name: name.trim(),
+      sku: sku.trim() || undefined,
+      supplier: supplier.trim() || undefined,
+      cost: costN,
+      price: priceN,
+      stockQty: num(stock) != null ? Math.max(0, Math.round(num(stock)!)) : undefined,
+      minStock: num(min) != null ? Math.max(0, Math.round(num(min)!)) : undefined,
+    };
+    const saved = part
+      ? partsRepo.update(tenant.id, part.id, payload)
+      : partsRepo.create(tenant.id, { tenantId: tenant.id, ...payload } as Omit<Part, "id">);
+    refreshServicePrices(tenant);
+    if (saved) {
+      toast.success(part ? "Recambio guardado" : "Recambio creado");
+      onSaved?.(saved);
+    }
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{part ? "Editar repuesto" : "Nuevo repuesto"}</DialogTitle>
-          <DialogDescription>
-            {part
-              ? "Actualiza los datos del repuesto."
-              : "Añade un repuesto al catálogo."}
-          </DialogDescription>
+          <DialogTitle>{part ? "Editar recambio" : "Nuevo recambio"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="p-name">Nombre *</Label>
+            <Label htmlFor="p-name">Nombre</Label>
             <Input
               id="p-name"
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Filtro de aceite"
-              maxLength={120}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Pastillas de freno delanteras"
+              maxLength={100}
             />
-            {errors.name && (
-              <p className="text-xs text-[var(--destructive)]">{errors.name}</p>
-            )}
           </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="p-price">Precio *</Label>
-              <Input
-                id="p-price"
-                type="number"
-                min={0}
-                inputMode="numeric"
-                value={form.price}
-                onChange={(e) => set("price", e.target.value)}
-                placeholder="0"
-              />
-              {errors.price && (
-                <p className="text-xs text-[var(--destructive)]">
-                  {errors.price}
-                </p>
-              )}
+              <Label htmlFor="p-sku">Código</Label>
+              <Input id="p-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="PF-2048" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="p-sku">SKU</Label>
+              <Label htmlFor="p-supplier">Proveedor</Label>
               <Input
-                id="p-sku"
-                value={form.sku}
-                onChange={(e) => set("sku", e.target.value)}
-                placeholder="Opcional"
-                maxLength={60}
+                id="p-supplier"
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                placeholder="A quién se lo pides"
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="p-cost">Precio de compra</Label>
+              <Input id="p-cost" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0,00" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="p-price">Precio de venta</Label>
+              <Input id="p-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0,00" />
+            </div>
+          </div>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Precios sin IVA.{margin !== null ? ` Margen: ${margin}%.` : ""}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="p-stock">Unidades en stock</Label>
+              <Input id="p-stock" inputMode="numeric" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="p-min">Mínimo</Label>
+              <Input id="p-min" inputMode="numeric" value={min} onChange={(e) => setMin(e.target.value)} placeholder="Sin control" />
+            </div>
+          </div>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Cuando queden el mínimo o menos, sale en «Por pedir». Déjalo vacío si no quieres controlar su stock.
+          </p>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button onClick={submit}>{part ? "Guardar" : "Crear repuesto"}</Button>
+          <Button onClick={save}>{part ? "Guardar" : "Crear recambio"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
