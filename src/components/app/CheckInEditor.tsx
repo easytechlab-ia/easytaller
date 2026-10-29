@@ -103,6 +103,11 @@ function CheckInForm({
     existing?.customerSignature,
   );
 
+  const [waive, setWaive] = useState(!!existing?.waiverLimit);
+  const [limit, setLimit] = useState(
+    existing?.waiverLimit ? String(existing.waiverLimit).replace(".", ",") : "",
+  );
+
   const addMark = (x: number, y: number) => {
     setMarks((prev) => [...prev, { x, y }]);
   };
@@ -114,6 +119,11 @@ function CheckInForm({
   };
 
   const save = () => {
+    const limitNum = Number(limit.replace(",", "."));
+    if (waive && !(limitNum > 0)) {
+      toast.error("Pon el importe máximo sin presupuesto.");
+      return;
+    }
     const kmNum = Math.max(0, Math.round(Number(km) || 0));
     const input: CheckInInput = {
       km: kmNum,
@@ -124,6 +134,7 @@ function CheckInForm({
         note: m.note?.trim() || undefined,
       })),
       customerSignature: signature,
+      waiverLimit: waive ? limitNum : undefined,
     };
     saveCheckIn(tenant.id, order, input);
     toast.success("Recepción registrada");
@@ -209,6 +220,34 @@ function CheckInForm({
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+
+        {/* Waiver: no quote needed below an amount */}
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={waive}
+              onChange={(e) => setWaive(e.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-accent)]"
+            />
+            <span className="text-sm text-foreground">
+              No necesito presupuesto si la reparación no supera este importe (IVA incluido)
+            </span>
+          </label>
+          {waive && (
+            <div className="flex items-center gap-2 pl-8">
+              <Input
+                inputMode="decimal"
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+                placeholder="150"
+                className="h-9 w-28"
+                aria-label="Importe máximo sin presupuesto"
+              />
+              <span className="text-sm text-muted-foreground">€</span>
+            </div>
           )}
         </div>
 
@@ -303,6 +342,12 @@ function CheckInSummary({
           )}
         </div>
         <div>
+          {c.waiverLimit ? (
+            <p className="mb-3 rounded-lg border border-border bg-background-subtle px-3 py-2 text-sm text-foreground">
+              No necesita presupuesto si no supera{" "}
+              <strong>{c.waiverLimit.toLocaleString("es-ES")} €</strong> (IVA incluido).
+            </p>
+          ) : null}
           <p className="mb-2 text-xs text-muted-foreground">Firma del cliente</p>
           {c.customerSignature ? (
             <img
@@ -403,4 +448,3 @@ function CarDiagram({
     </div>
   );
 }
-
