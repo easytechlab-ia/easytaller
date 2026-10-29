@@ -64,7 +64,9 @@ import {
   generateInvoiceFromOrder,
   getInvoiceByWorkOrderId,
   BILLING_STAGE_LABELS,
+  PAYMENT_METHOD_LABELS,
   billingStage,
+  updateBilling,
 } from "@/lib/invoices";
 import { compressImage } from "@/lib/image";
 import { formatDate } from "@/lib/format";
@@ -76,7 +78,7 @@ import {
   receivedMessage,
   whatsappUrl,
 } from "@/lib/whatsapp";
-import type { Customer, Photo, Tenant, Vehicle, WorkOrder } from "@/types";
+import type { Customer, PaymentMethod, Photo, Tenant, Vehicle, WorkOrder } from "@/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/ordenes/$id")({
@@ -141,7 +143,11 @@ function OrderDetail() {
   const customer = customersRepo.getById(tenant.id, order.customerId);
   const mechanics = listMechanics(tenant.id);
   const transitions = nextStatuses(order.status);
-  const canQuote = can(user.role, "presupuestos");
+  // Mechanics only see the quote if the shop allows it (Equipo), and then maybe
+  // without prices.
+  const canQuote =
+    can(user.role, "presupuestos") || (user.role === "mechanic" && !!tenant.mechanicCanAddLines);
+  const hidePrices = user.role === "mechanic" && !tenant.mechanicCanSeePrices;
   const canBill = can(user.role, "facturacion") && isModuleEnabled(tenant, "facturacion");
   const canScheduleReminder =
     order.status === "entregado" &&
@@ -276,7 +282,7 @@ function OrderDetail() {
 
           {/* Quote editor — hidden for roles without quote access (mechanic) */}
           {canQuote && (
-            <QuoteEditor order={order} tenant={tenant} onSaved={bump} />
+            <QuoteEditor order={order} tenant={tenant} onSaved={bump} hidePrices={hidePrices} />
           )}
 
 
@@ -313,6 +319,7 @@ function OrderDetail() {
       <NotifyDialog
         kind={notify}
         onClose={() => setNotify(null)}
+        onPaid={bump}
         order={order}
         tenant={tenant}
         customer={customer}
@@ -585,6 +592,7 @@ const NOTIFY_COPY: Record<
 function NotifyDialog({
   kind,
   onClose,
+  onPaid,
   order,
   tenant,
   customer,
@@ -592,6 +600,7 @@ function NotifyDialog({
 }: {
   kind: NotifyKind | null;
   onClose: () => void;
+  onPaid: () => void;
   order: WorkOrder;
   tenant: Tenant;
   customer?: Customer;
@@ -621,12 +630,34 @@ function NotifyDialog({
   // Fresh draft every time the dialog opens.
   useEffect(() => {
     if (kind) setText(initial);
-  }, [kind, initial]);
+    // Only when it opens: noting the payment must not wipe what they typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
 
   const send = () => {
     window.open(whatsappUrl(customer?.phone, text), "_blank");
     toast.success("WhatsApp abierto con el mensaje listo para enviar");
     onClose();
+  };
+
+  // Handing the car back is also when it's paid: note how.
+  const pay = (method: PaymentMethod | null) => {
+    const now = new Date().toISOString();
+    updateOrder(tenant.id, order.id, {
+      paymentMethod: method ?? undefined,
+      paidAt: method ? now : undefined,
+    });
+    const invoice = getInvoiceByWorkOrderId(tenant.id, order.id);
+    if (invoice) {
+      updateBilling(
+        tenant.id,
+        invoice.id,
+        method
+          ? { status: "paid", paymentMethod: method, paidAmount: invoice.total }
+          : { status: "pending", paymentMethod: undefined, paidAmount: undefined },
+      );
+    }
+    onPaid();
   };
 
   const copy = NOTIFY_COPY[kind ?? "avance"];
@@ -652,6 +683,30 @@ function NotifyDialog({
               : "Se abrirá WhatsApp con este mensaje. Solo tienes que elegir el contacto y enviar."}
           </DialogDescription>
         </DialogHeader>
+        {kind === "entregado" && (
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            <p className="text-sm font-medium text-foreground">¿Cómo ha pagado?</p>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
+                <Button
+                  key={m}
+                  size="sm"
+                  variant={order.paymentMethod === m ? "default" : "outline"}
+                  onClick={() => pay(m)}
+                >
+                  {PAYMENT_METHOD_LABELS[m]}
+                </Button>
+              ))}
+              <Button
+                size="sm"
+                variant={order.paidAt ? "ghost" : "secondary"}
+                onClick={() => pay(null)}
+              >
+                Aún no ha pagado
+              </Button>
+            </div>
+          </div>
+        )}
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

@@ -6,6 +6,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   BellRing,
   Package,
   Pencil,
@@ -40,14 +41,15 @@ import { QuotePrintDialog } from "@/components/app/QuoteDocument";
 import { QuoteWhatsAppDialog } from "@/components/app/QuoteWhatsAppDialog";
 import {
   QUOTE_STAGE_LABELS,
-  addQuoteItem,
   addQuoteItems,
   approvedTotals,
   daysSince,
+  diagnosisLine,
   lineAmount,
   quoteBreakdown,
   quoteSentDate,
   quoteStage,
+  quoteStockShortages,
   removeQuoteItem,
   sendQuote,
   updateQuoteItem,
@@ -63,10 +65,13 @@ export function QuoteEditor({
   order,
   tenant,
   onSaved,
+  hidePrices = false,
 }: {
   order: WorkOrder;
   tenant: Tenant;
   onSaved: () => void;
+  /** Mechanic without price access: adds lines (priced from the catalog) but sees no amounts. */
+  hidePrices?: boolean;
 }) {
   const [editing, setEditing] = useState<{ type: QuoteItem["type"]; item: QuoteItem | null } | null>(
     null,
@@ -89,18 +94,26 @@ export function QuoteEditor({
   const labor = order.items.filter((i) => i.type === "labor");
   const parts = order.items.filter((i) => i.type === "part");
   const waitingDays = stage === "sent" ? daysSince(quoteSentDate(order)) : undefined;
+  const unpriced = order.items.filter((i) => i.needsPrice).length;
+  const shortages = quoteStockShortages(tenant.id, order.items);
+  // Hide amounts for a mechanic without price access.
+  const amount = (n: number) => (hidePrices ? "" : money(n));
 
   const addService = (serviceId: string) => {
     const service = services.find((s) => s.id === serviceId);
     if (!service) return;
-    addQuoteItems(tenant.id, order, serviceQuoteLines(tenant, service));
+    // The first lines of a quote bring the diagnosis fee with them.
+    addQuoteItems(tenant.id, order, [
+      ...diagnosisLine(tenant, order),
+      ...serviceQuoteLines(tenant, service),
+    ]);
     toast.success(`«${service.name}» añadido`);
     onSaved();
   };
 
   const submit = (input: QuoteItemInput) => {
     if (editing?.item) updateQuoteItem(tenant.id, order, editing.item.id, input);
-    else addQuoteItem(tenant.id, order, input);
+    else addQuoteItems(tenant.id, order, [...diagnosisLine(tenant, order), input]);
     setEditing(null);
     onSaved();
   };
@@ -151,7 +164,7 @@ export function QuoteEditor({
       <Block
         icon={Wrench}
         title="Mano de obra"
-        subtotal={money(totals.labor)}
+        subtotal={amount(totals.labor)}
         empty="Sin horas de mano de obra."
         addLabel="Añadir horas"
         onAdd={() => setEditing({ type: "labor", item: null })}
@@ -160,8 +173,14 @@ export function QuoteEditor({
           <Line
             key={it.id}
             item={it}
-            detail={`${hoursLabel(it.qty)} × ${money(it.unitPrice)}/h`}
-            amount={money(lineAmount(it))}
+            detail={
+              it.diagnosis && tenant.diagnosisWaived && it.unitPrice > 0
+                ? "Se descuenta si acepta la reparación"
+                : hidePrices
+                  ? hoursLabel(it.qty)
+                  : `${hoursLabel(it.qty)} × ${money(it.unitPrice)}/h`
+            }
+            amount={amount(lineAmount(it))}
             showApproval={answered || stage === "sent"}
             onEdit={() => setEditing({ type: "labor", item: it })}
             onRemove={() => remove(it)}
@@ -172,7 +191,7 @@ export function QuoteEditor({
       <Block
         icon={Package}
         title="Recambios"
-        subtotal={money(totals.parts)}
+        subtotal={amount(totals.parts)}
         empty="Sin recambios."
         addLabel="Añadir recambio"
         onAdd={() => setEditing({ type: "part", item: null })}
@@ -181,8 +200,8 @@ export function QuoteEditor({
           <Line
             key={it.id}
             item={it}
-            detail={`${it.qty} × ${money(it.unitPrice)}`}
-            amount={money(lineAmount(it))}
+            detail={hidePrices ? `${it.qty} ud.` : `${it.qty} × ${money(it.unitPrice)}`}
+            amount={amount(lineAmount(it))}
             showApproval={answered || stage === "sent"}
             onEdit={() => setEditing({ type: "part", item: it })}
             onRemove={() => remove(it)}
@@ -190,8 +209,32 @@ export function QuoteEditor({
         ))}
       </Block>
 
+      {/* Not enough parts in stock for this quote */}
+      {shortages.length > 0 && (
+        <div className="mb-3 space-y-1 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-foreground">
+          {shortages.map((sh) => (
+            <p key={sh.partId} className="flex items-start gap-2">
+              <AlertTriangle strokeWidth={1.5} className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
+              <span>
+                {sh.name}: quedan {sh.have} y necesitas {sh.need}.
+                {sh.supplier ? ` Pídelo a ${sh.supplier}.` : " Hay que pedirlo."}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Lines added without a price (by a mechanic) */}
+      {unpriced > 0 && !hidePrices && (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-foreground">
+          <AlertTriangle strokeWidth={1.5} className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
+          {unpriced === 1 ? "Falta poner precio a 1 línea" : `Falta poner precio a ${unpriced} líneas`}{" "}
+          antes de enviar el presupuesto.
+        </p>
+      )}
+
       {/* Totals */}
-      {order.items.length > 0 && (
+      {order.items.length > 0 && !hidePrices && (
         <div className="mt-4 space-y-1 border-t border-border pt-3 text-sm">
           <Row label="Base imponible" value={money(totals.subtotal)} />
           <Row label={`IVA (${Math.round(tenant.taxRate * 100)}%)`} value={money(totals.tax)} />
@@ -203,7 +246,7 @@ export function QuoteEditor({
       )}
 
       {/* Actions */}
-      {order.items.length > 0 && (
+      {order.items.length > 0 && !hidePrices && (
         <div className="mt-4 flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
           <Button variant="outline" onClick={() => setPrintOpen(true)}>
             <Printer strokeWidth={1.5} />
@@ -220,7 +263,7 @@ export function QuoteEditor({
               Recordar por WhatsApp
             </Button>
           ) : stage === "draft" ? (
-            <Button onClick={send}>
+            <Button onClick={send} disabled={unpriced > 0}>
               <Send strokeWidth={1.5} />
               {order.quoteApproval ? "Enviar los cambios por WhatsApp" : "Enviar al cliente por WhatsApp"}
             </Button>
@@ -232,6 +275,7 @@ export function QuoteEditor({
         key={`${editing?.type}-${editing?.item?.id ?? "new"}`}
         state={editing}
         tenant={tenant}
+        hidePrices={hidePrices}
         onClose={() => setEditing(null)}
         onSubmit={submit}
       />
@@ -336,6 +380,9 @@ function Line({
               {warranty}
             </span>
           )}
+          {item.needsPrice && (
+            <span className="ml-2 font-medium text-[var(--warning)]">Falta precio</span>
+          )}
           {showApproval && <span className={cn("ml-2 font-medium", tag.className)}>{tag.label}</span>}
         </p>
       </button>
@@ -366,11 +413,13 @@ function num(v: string): number {
 function LineDialog({
   state,
   tenant,
+  hidePrices,
   onClose,
   onSubmit,
 }: {
   state: { type: QuoteItem["type"]; item: QuoteItem | null } | null;
   tenant: Tenant;
+  hidePrices: boolean;
   onClose: () => void;
   onSubmit: (input: QuoteItemInput) => void;
 }) {
@@ -400,7 +449,9 @@ function LineDialog({
 
   const q = num(qty);
   const pr = num(price);
-  const valid = description.trim().length > 0 && q > 0 && pr >= 0;
+  // A mechanic writing a part by hand can't price it: someone else will.
+  const leavesUnpriced = hidePrices && type === "part" && (partId === OTHER || !!item?.needsPrice);
+  const valid = description.trim().length > 0 && q > 0 && (leavesUnpriced || pr >= 0);
   const money = (n: number) => formatCurrencyCents(n, tenant.currency);
 
   const submit = () => {
@@ -409,7 +460,8 @@ function LineDialog({
       type,
       description: description.trim(),
       qty: q,
-      unitPrice: pr,
+      unitPrice: leavesUnpriced ? 0 : pr,
+      needsPrice: leavesUnpriced,
       warrantyMonths: num(months) > 0 ? Math.round(num(months)) : undefined,
       warrantyKm: num(km) > 0 ? Math.round(num(km)) : undefined,
       partId: type === "part" && partId && partId !== OTHER ? partId : undefined,
@@ -436,7 +488,8 @@ function LineDialog({
                 <SelectContent>
                   {parts.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.name} · {money(p.price)}
+                      {p.name}
+                      {hidePrices ? "" : ` · ${money(p.price)}`}
                       {p.stockQty != null ? ` · quedan ${p.stockQty}` : ""}
                     </SelectItem>
                   ))}
@@ -464,10 +517,12 @@ function LineDialog({
               <Label htmlFor="l-qty">{type === "labor" ? "Horas" : "Cantidad"}</Label>
               <Input id="l-qty" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="l-price">{type === "labor" ? "Precio por hora" : "Precio por unidad"}</Label>
-              <Input id="l-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
-            </div>
+            {!hidePrices && (
+              <div className="space-y-1.5">
+                <Label htmlFor="l-price">{type === "labor" ? "Precio por hora" : "Precio por unidad"}</Label>
+                <Input id="l-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -478,10 +533,18 @@ function LineDialog({
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg bg-background-subtle px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Importe (sin IVA)</span>
-            <span className="font-medium tabular-nums text-foreground">{money(q * pr)}</span>
-          </div>
+          {hidePrices ? (
+            <p className="rounded-lg bg-background-subtle px-3 py-2 text-sm text-muted-foreground">
+              {leavesUnpriced
+                ? "Recepción le pondrá el precio antes de enviarlo."
+                : "El precio sale solo de tu catálogo."}
+            </p>
+          ) : (
+            <div className="flex items-center justify-between rounded-lg bg-background-subtle px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Importe (sin IVA)</span>
+              <span className="font-medium tabular-nums text-foreground">{money(q * pr)}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
