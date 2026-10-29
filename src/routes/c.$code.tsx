@@ -26,7 +26,13 @@ import {
   PHOTO_LABEL_TEXT,
   listOrdersByVehicleId,
 } from "@/lib/orders";
-import { acceptQuote, quoteBreakdown, rejectQuote, warrantyLabel } from "@/lib/quotes";
+import {
+  acceptQuote,
+  chosenLines,
+  quoteBreakdown,
+  rejectQuote,
+  warrantyLabel,
+} from "@/lib/quotes";
 import { QuotePrintDialog } from "@/components/app/QuoteDocument";
 import { getInvoiceByWorkOrderId } from "@/lib/invoices";
 import { createReview, getReviewByOrderId } from "@/lib/reviews";
@@ -520,12 +526,17 @@ function QuoteSection({
   }
 
   const deciding = items.some((i) => i.approval === "pending");
-  const counted = items.filter(
-    (i) => i.approval === "approved" || (i.approval === "pending" && !excluded.includes(i.id)),
-  );
+  const counted = chosenLines(tenant, items, excluded);
   const t = quoteBreakdown(counted, tenant.taxRate);
   const money = (n: number) => formatCurrencyCents(n, tenant.currency);
-  const nothingChosen = deciding && counted.length === 0;
+  // Repair lines kept (the diagnosis fee isn't a repair).
+  const repairsChosen = items.some(
+    (i) =>
+      !i.diagnosis &&
+      (i.approval === "approved" || (i.approval === "pending" && !excluded.includes(i.id))),
+  );
+  const nothingChosen = deciding && !repairsChosen;
+  const repairsAccepted = items.some((i) => !i.diagnosis && i.approval === "approved");
   const customer = customersRepo.getById(tenant.id, order.customerId);
 
   const toggle = (id: string) =>
@@ -565,7 +576,12 @@ function QuoteSection({
         <ul className="divide-y divide-border rounded-lg border border-border">
           {lines.map((it) => {
             const pending = it.approval === "pending";
-            const on = pending ? !excluded.includes(it.id) : it.approval === "approved";
+            const waivedNow = !!it.diagnosis && !!tenant.diagnosisWaived && repairsChosen;
+            const on = it.diagnosis
+              ? !waivedNow && it.unitPrice > 0
+              : pending
+                ? !excluded.includes(it.id)
+                : it.approval === "approved";
             const warranty = warrantyLabel(it);
             const detail =
               kind === "labor"
@@ -578,9 +594,14 @@ function QuoteSection({
                     {it.description}
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    {detail}
+                    {it.diagnosis
+                      ? tenant.diagnosisWaived
+                        ? "Gratis si haces la reparación con nosotros"
+                        : "Se cobra aunque no hagas la reparación"
+                      : detail}
                     {warranty ? ` · Garantía ${warranty}` : ""}
-                    {!pending && (it.approval === "approved" ? " · Aceptado" : " · No lo quieres")}
+                    {!pending && !it.diagnosis &&
+                      (it.approval === "approved" ? " · Aceptado" : " · No lo quieres")}
                   </span>
                 </span>
                 <span
@@ -595,7 +616,7 @@ function QuoteSection({
             );
             return (
               <li key={it.id}>
-                {pending ? (
+                {pending && !it.diagnosis ? (
                   <label className="flex cursor-pointer items-center gap-3 px-3 py-3">
                     <input
                       type="checkbox"
@@ -644,7 +665,7 @@ function QuoteSection({
         <Row label="Base imponible" value={money(t.subtotal)} />
         <Row label={`IVA (${Math.round(tenant.taxRate * 100)}%)`} value={money(t.tax)} />
         <div className="flex items-center justify-between pt-1 text-lg font-bold text-foreground">
-          <span>{deciding ? "Total" : "Total aceptado"}</span>
+          <span>{deciding ? "Total" : "Total a pagar"}</span>
           <span className="tabular-nums">{money(t.total)}</span>
         </div>
       </div>
@@ -673,7 +694,7 @@ function QuoteSection({
         </div>
       ) : order.quoteApproval ? (
         <div className="mt-4 rounded-lg border border-border bg-background-subtle p-4">
-          {counted.length > 0 ? (
+          {repairsAccepted ? (
             <>
               <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                 <Check strokeWidth={2} className="h-4 w-4" style={{ color: "var(--success)" }} />
