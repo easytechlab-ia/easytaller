@@ -42,6 +42,7 @@ export interface Tenant {
   // What a mechanic may do with quotes (set in Equipo).
   mechanicCanAddLines?: boolean;
   mechanicCanSeePrices?: boolean;
+  quoteValidityDays?: number; // how long a quote is valid (shown on every quote)
   locations: Location[];
   createdAt: string;
   // Configuration (set from /app/configuracion). All optional.
@@ -78,6 +79,7 @@ export interface Customer {
   // name of a company or self-employed person.
   taxId?: string; // NIF / CIF
   address?: string; // fiscal address
+  dataConsentAt?: string; // when the customer accepted the data-protection terms
   createdAt: string;
 }
 
@@ -181,6 +183,8 @@ export interface CheckIn {
   fuelLevel: number; // 0-100
   bodyDamage: BodyDamageMark[];
   customerSignature?: string; // base64 signature
+  // "No necesito presupuesto si no supera X €" (IVA incluido), signed with the same signature.
+  waiverLimit?: number;
   createdAt: string;
 }
 
@@ -328,6 +332,7 @@ export interface Invoice {
 export type PaymentMethod = "efectivo" | "tarjeta" | "bizum" | "transferencia";
 
 export type AppointmentStatus =
+  | "pendiente" // online request, waiting for the shop to confirm
   | "programada"
   | "confirmada"
   | "en_taller"
@@ -344,6 +349,7 @@ export interface Appointment {
   scheduledAt: string;
   status: AppointmentStatus;
   source: "manual" | "online";
+  proposed?: boolean; // the shop proposed another time and waits for the customer
   notes?: string;
   // Set when the car is received and a work order is created from this appointment.
   workOrderId?: string;
@@ -413,6 +419,6 @@ export interface MaintenanceReminder {
   dueKm?: number; // odometer target — due when vehicle.km >= dueKm
   note?: string;
   status: "pending" | "done" | "dismissed";
-  notified?: boolean; // true once it has emitted its overdue notification
+  notified?: boolean; // true once it emitted its overdue notification
   createdAt: string;
 }
