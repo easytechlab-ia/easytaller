@@ -165,7 +165,7 @@ function CitasPage() {
       return;
     }
     toast.success(`Orden creada · ${order.accessCode}`);
-    navigate({ to: "/app/ordenes/$id", params: { id: order.id } });
+    navigate({ to: "/app/ordenes/$id", params: { id: order.id }, search: { avisar: "recibido" } });
   };
 
   return (

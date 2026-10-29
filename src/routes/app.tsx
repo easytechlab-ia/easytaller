@@ -15,8 +15,6 @@ import {
   Receipt,
   Wrench,
   Boxes,
-  MessageSquare,
-  Bot,
   BellRing,
   Star,
   UsersRound,
@@ -34,7 +32,6 @@ import { can, moduleForPath, isModuleEnabled } from "@/lib/permissions";
 import { evaluateReminders } from "@/lib/reminders";
 import { evaluateDocumentExpiries } from "@/lib/documents";
 import { evaluateLowStock } from "@/lib/stock";
-import { unreadMessagesCount } from "@/lib/inbox";
 import { cn } from "@/lib/utils";
 import { IS_DEMO } from "@/lib/mode";
 import { accentVars, useAccentOnRoot } from "@/lib/colors";
@@ -61,8 +58,6 @@ const NAV = [
   { to: "/app/web", label: "Mi web", icon: Globe, exact: false, module: "web" },
   { to: "/app/presupuestos", label: "Presupuestos", icon: FileText, exact: false, module: "presupuestos" },
   { to: "/app/facturacion", label: "Facturación", icon: Receipt, exact: false, module: "facturacion" },
-  { to: "/app/mensajes", label: "Mensajes", icon: MessageSquare, exact: false, module: "mensajes" },
-  { to: "/app/agentes", label: "Agentes", icon: Bot, exact: false, module: "agentes" },
   { to: "/app/resenas", label: "Reseñas", icon: Star, exact: false, module: "resenas" },
   { to: "/app/equipo", label: "Equipo", icon: UsersRound, exact: false, module: "equipo" },
   { to: "/app/configuracion", label: "Configuración", icon: Settings, exact: false, module: "configuracion" },
@@ -141,9 +136,6 @@ function AppLayout() {
   const moreItems = navItems.filter((item) => !BOTTOM_PATHS.has(item.to));
   const moreActive = moreItems.some((item) => pathname.startsWith(item.to));
 
-  // Unread customer messages badge (recomputed on every navigation).
-  const unreadMessages = unreadMessagesCount(tenant.id);
-
   // The shop's main colour (chosen in "Mi web") themes the whole panel.
   const accentStyle = accentVars(tenant.accentColor);
 
@@ -180,11 +172,6 @@ function AppLayout() {
               >
                 <item.icon strokeWidth={1.5} className="h-4 w-4" />
                 <span className="flex-1">{item.label}</span>
-                {item.module === "mensajes" && unreadMessages > 0 && (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground">
-                    {unreadMessages > 9 ? "9+" : unreadMessages}
-                  </span>
-                )}
               </Link>
             );
           })}

@@ -1,25 +1,25 @@
 // EasyTaller — ficha de orden (hub central). Cabecera, control de estado, notas,
-// mensajes al cliente, fotos, presupuesto, inspección, check-in y compartir.
-// Al marcar "Listo" se ofrece avisar al cliente por WhatsApp con el mensaje ya
-// escrito (enlace wa.me; el envío lo hace el taller desde su WhatsApp).
+// fotos, presupuesto, inspección, check-in y compartir. En los momentos clave
+// (coche recibido, listo y entregado) se ofrece avisar al cliente por WhatsApp
+// con el mensaje ya escrito; en el resto hay un botón para avisar si hace falta.
+// Enlace wa.me: el envío lo hace el taller desde su WhatsApp.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Car,
   User,
   Wrench,
-  Send,
   Camera,
   Copy,
-  Share2,
   Loader2,
   Trash2,
   Receipt,
   BellRing,
   MessageCircle,
   PartyPopper,
+  Handshake,
 } from "lucide-react";
 import { PageHeader } from "@/components/base/PageHeader";
 import { EmptyState } from "@/components/base/EmptyState";
@@ -50,7 +50,6 @@ import {
   PHOTO_LABEL_TEXT,
   STATUS_LABELS,
   addOrderPhoto,
-  addShopMessage,
   changeOrderStatus,
   listMechanics,
   nextStatuses,
@@ -68,25 +67,56 @@ import {
   billingStage,
 } from "@/lib/invoices";
 import { compressImage } from "@/lib/image";
-import { formatDateTime } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { can, canEdit, isModuleEnabled } from "@/lib/permissions";
-import { readyMessage, whatsappUrl } from "@/lib/whatsapp";
+import {
+  deliveredMessage,
+  progressMessage,
+  readyMessage,
+  receivedMessage,
+  whatsappUrl,
+} from "@/lib/whatsapp";
 import type { Customer, Photo, Tenant, Vehicle, WorkOrder } from "@/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/ordenes/$id")({
+  // ?avisar=recibido|listo|entregado → offer the WhatsApp message for that
+  // moment (new order, or a status changed from the board).
+  validateSearch: (search: Record<string, unknown>): { avisar?: AvisarKind } =>
+    search.avisar === "recibido" || search.avisar === "listo" || search.avisar === "entregado"
+      ? { avisar: search.avisar }
+      : {},
   component: OrderDetail,
 });
+
+type AvisarKind = "recibido" | "listo" | "entregado";
+type NotifyKind = AvisarKind | "avance";
+
+/** Which message fits the car's current status. */
+function notifyKindFor(status: WorkOrder["status"]): NotifyKind {
+  if (status === "recibido" || status === "listo" || status === "entregado") return status;
+  return "avance";
+}
 
 const MAX_PHOTOS = 12;
 
 function OrderDetail() {
   const { id } = Route.useParams();
+  const { avisar } = Route.useSearch();
+  const navigate = useNavigate();
   const { ready, user, tenant } = useAuth();
   const [version, setVersion] = useState(0);
   const [reminderOpen, setReminderOpen] = useState(false);
-  const [readyOpen, setReadyOpen] = useState(false);
+  const [notify, setNotify] = useState<NotifyKind | null>(null);
   const bump = () => setVersion((v) => v + 1);
+
+  // Arrived for a key moment (new order, car received from an appointment, or
+  // status changed on the board): offer the message, then clean the URL.
+  useEffect(() => {
+    if (!avisar) return;
+    setNotify(avisar);
+    navigate({ to: "/app/ordenes/$id", params: { id }, search: {}, replace: true });
+  }, [avisar, id, navigate]);
 
   const order = useMemo(() => {
     if (!ready || !tenant) return null;
@@ -122,8 +152,8 @@ function OrderDetail() {
     changeOrderStatus(tenant, order, next as WorkOrder["status"]);
     toast.success(`Estado: ${STATUS_LABELS[next as WorkOrder["status"]]}`);
     bump();
-    // The key moment of the demo: car ready → tell the customer on WhatsApp.
-    if (next === "listo") setReadyOpen(true);
+    // Key moments: tell the customer on WhatsApp (ready to pick up / handed back).
+    if (next === "listo" || next === "entregado") setNotify(next);
   };
 
   const setMechanic = (mid: string) => {
@@ -230,10 +260,18 @@ function OrderDetail() {
                 ))}
               </div>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-8 px-2 text-muted-foreground"
+              onClick={() => setNotify(notifyKindFor(order.status))}
+            >
+              <MessageCircle strokeWidth={1.5} />
+              Avisar al cliente por WhatsApp
+            </Button>
           </DataCard>
 
           <ProblemNotes order={order} tenantId={tenant.id} onSaved={bump} />
-          <Messages order={order} tenantId={tenant.id} onSaved={bump} />
           <Photos order={order} tenantId={tenant.id} onSaved={bump} />
 
           {/* Quote editor — hidden for roles without quote access (mechanic) */}
@@ -268,20 +306,15 @@ function OrderDetail() {
               </Button>
             </DataCard>
           )}
-          <ShareCard
-            order={order}
-            tenantName={tenant.name}
-            customer={customer}
-            vehicle={vehicle}
-          />
+          <ShareCard order={order} />
         </div>
       </div>
 
-      <ReadyDialog
-        open={readyOpen}
-        onOpenChange={setReadyOpen}
+      <NotifyDialog
+        kind={notify}
+        onClose={() => setNotify(null)}
         order={order}
-        tenantName={tenant.name}
+        tenant={tenant}
         customer={customer}
         vehicle={vehicle}
       />
@@ -347,64 +380,6 @@ function ProblemNotes({
         </div>
         <Button size="sm" onClick={save} disabled={!dirty}>
           Guardar
-        </Button>
-      </div>
-    </DataCard>
-  );
-}
-
-function Messages({
-  order,
-  tenantId,
-  onSaved,
-}: {
-  order: WorkOrder;
-  tenantId: string;
-  onSaved: () => void;
-}) {
-  const [text, setText] = useState("");
-
-  const send = () => {
-    if (!text.trim()) return;
-    addShopMessage(tenantId, order, text.trim());
-    setText("");
-    toast.success("Mensaje enviado al cliente");
-    onSaved();
-  };
-
-  return (
-    <DataCard title="Mensajes al cliente">
-      <div className="space-y-2">
-        {order.messages.length === 0 && (
-          <p className="text-sm text-muted-foreground">Sin mensajes todavía.</p>
-        )}
-        {order.messages.map((m) => (
-          <div
-            key={m.id}
-            className={
-              m.from === "shop"
-                ? "ml-8 rounded-lg bg-secondary px-3 py-2"
-                : "mr-8 rounded-lg border border-border px-3 py-2"
-            }
-          >
-            <p className="text-sm text-foreground">{m.text}</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {m.from === "shop" ? "Taller" : "Cliente"} ·{" "}
-              {formatDateTime(m.createdAt)}
-            </p>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex gap-2">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Escribe un mensaje para el cliente…"
-          className="min-h-[40px]"
-          maxLength={500}
-        />
-        <Button size="icon" onClick={send} className="shrink-0">
-          <Send strokeWidth={1.5} />
         </Button>
       </div>
     </DataCard>
@@ -588,54 +563,89 @@ function trackingLink(order: WorkOrder): string {
   return `${origin}/c/${order.accessCode}`;
 }
 
-/** After marking "Listo": prefilled WhatsApp message to the customer. */
-function ReadyDialog({
-  open,
-  onOpenChange,
+const NOTIFY_COPY: Record<
+  NotifyKind,
+  { title: string; icon: typeof Car; tone: string }
+> = {
+  recibido: {
+    title: "Coche recibido. ¿Le mandamos el enlace de seguimiento?",
+    icon: Car,
+    tone: "var(--primary)",
+  },
+  listo: { title: "¡Coche listo! ¿Avisamos al cliente?", icon: PartyPopper, tone: "var(--success)" },
+  entregado: {
+    title: "Coche entregado. ¿Le enviamos el resumen?",
+    icon: Handshake,
+    tone: "var(--success)",
+  },
+  avance: { title: "Avisar al cliente", icon: MessageCircle, tone: "var(--primary)" },
+};
+
+/** Prefilled WhatsApp message to the customer for a moment of the repair. */
+function NotifyDialog({
+  kind,
+  onClose,
   order,
-  tenantName,
+  tenant,
   customer,
   vehicle,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  kind: NotifyKind | null;
+  onClose: () => void;
   order: WorkOrder;
-  tenantName: string;
+  tenant: Tenant;
   customer?: Customer;
   vehicle?: Vehicle;
 }) {
-  const initial = useMemo(
-    () =>
-      readyMessage({
-        customerName: customer?.name,
-        vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model}` : undefined,
-        plate: vehicle?.plate,
-        tenantName,
-        trackingUrl: trackingLink(order),
-      }),
-    [customer, vehicle, tenantName, order],
-  );
+  const initial = useMemo(() => {
+    if (!kind) return "";
+    const base = {
+      customerName: customer?.name,
+      vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model}` : undefined,
+      plate: vehicle?.plate,
+      tenantName: tenant.name,
+      trackingUrl: trackingLink(order),
+    };
+    if (kind === "recibido") return receivedMessage(base);
+    if (kind === "listo") return readyMessage(base);
+    if (kind === "entregado")
+      return deliveredMessage({ ...base, askReview: isModuleEnabled(tenant, "resenas") });
+    const readyBy =
+      order.estimatedReadyAt && (order.status === "aprobado" || order.status === "en_reparacion")
+        ? formatDate(order.estimatedReadyAt)
+        : undefined;
+    return progressMessage({ ...base, status: order.status, readyBy });
+  }, [kind, customer, vehicle, tenant, order]);
   const [text, setText] = useState(initial);
 
   // Fresh draft every time the dialog opens.
   useEffect(() => {
-    if (open) setText(initial);
-  }, [open, initial]);
+    if (kind) setText(initial);
+  }, [kind, initial]);
 
   const send = () => {
     window.open(whatsappUrl(customer?.phone, text), "_blank");
     toast.success("WhatsApp abierto con el mensaje listo para enviar");
-    onOpenChange(false);
+    onClose();
   };
 
+  const copy = NOTIFY_COPY[kind ?? "avance"];
+  const Icon = copy.icon;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={!!kind} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <div className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--success)_14%,transparent)] text-[var(--success)] sm:mx-0">
-            <PartyPopper strokeWidth={1.5} className="h-6 w-6" />
+          <div
+            className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-full sm:mx-0"
+            style={{
+              color: copy.tone,
+              backgroundColor: `color-mix(in srgb, ${copy.tone} 14%, transparent)`,
+            }}
+          >
+            <Icon strokeWidth={1.5} className="h-6 w-6" />
           </div>
-          <DialogTitle>¡Coche listo! ¿Avisamos al cliente?</DialogTitle>
+          <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription>
             {customer
               ? `Se abrirá WhatsApp con este mensaje para ${customer.name} (${customer.phone}). Solo tienes que darle a enviar.`
@@ -649,7 +659,7 @@ function ReadyDialog({
           className="text-sm"
         />
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={onClose}>
             Ahora no
           </Button>
           <Button
@@ -665,17 +675,7 @@ function ReadyDialog({
   );
 }
 
-function ShareCard({
-  order,
-  tenantName,
-  customer,
-  vehicle,
-}: {
-  order: WorkOrder;
-  tenantName: string;
-  customer?: Customer;
-  vehicle?: Vehicle;
-}) {
+function ShareCard({ order }: { order: WorkOrder }) {
   const link = trackingLink(order);
 
   const copy = async () => {
@@ -685,13 +685,6 @@ function ShareCard({
     } catch {
       toast.error("No se pudo copiar el enlace.");
     }
-  };
-
-  const whatsapp = () => {
-    const firstName = customer?.name.split(" ")[0];
-    const car = vehicle ? `tu ${vehicle.make} ${vehicle.model}` : "tu coche";
-    const msg = `Hola${firstName ? ` ${firstName}` : ""}, te escribimos de ${tenantName}. Puedes seguir el estado de ${car} aquí: ${link}`;
-    window.open(whatsappUrl(customer?.phone, msg), "_blank");
   };
 
   return (
@@ -707,10 +700,6 @@ function ShareCard({
         <Button variant="outline" onClick={copy}>
           <Copy strokeWidth={1.5} />
           Copiar enlace
-        </Button>
-        <Button variant="outline" onClick={whatsapp}>
-          <Share2 strokeWidth={1.5} />
-          Enviar seguimiento por WhatsApp
         </Button>
         <Link
           to="/c/$code"
