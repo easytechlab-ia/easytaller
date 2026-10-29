@@ -9,14 +9,11 @@ import {
   AlertCircle,
   AlertTriangle,
   X,
-  MessageSquare,
-  Send,
+  MessageCircle,
   PenLine,
   Printer,
   ReceiptText,
   History,
-  ChevronDown,
-  ShieldCheck,
   Star,
   ExternalLink,
 } from "lucide-react";
@@ -27,9 +24,7 @@ import { useAuth } from "@/lib/auth/AuthContext";
 import { customersRepo, findWorkOrderByAccessCode, vehiclesRepo } from "@/lib/db";
 import {
   PHOTO_LABEL_TEXT,
-  addCustomerMessage,
   listOrdersByVehicleId,
-  quoteTotals,
 } from "@/lib/orders";
 import { acceptQuote, quoteBreakdown, rejectQuote, warrantyLabel } from "@/lib/quotes";
 import { QuotePrintDialog } from "@/components/app/QuoteDocument";
@@ -37,6 +32,8 @@ import { getInvoiceByWorkOrderId } from "@/lib/invoices";
 import { createReview, getReviewByOrderId } from "@/lib/reviews";
 import { inspectionSummary } from "@/lib/inspection";
 import { isModuleEnabled } from "@/lib/permissions";
+import { getWebsiteSettings, websiteWhatsapp } from "@/lib/website";
+import { customerToShopMessage, whatsappUrl } from "@/lib/whatsapp";
 import { formatCurrencyCents, formatDate, formatDateTime } from "@/lib/format";
 import {
   Dialog,
@@ -48,14 +45,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/base/SignaturePad";
-import { StatusBadge } from "@/components/base/StatusBadge";
 import {
   InvoiceDocument,
   printInvoiceDocument,
 } from "@/components/InvoiceDocument";
 import type {
   InspectionItem,
-  Invoice,
   Photo,
   QuoteItem,
   Tenant,
@@ -150,9 +145,6 @@ function GuestView() {
   const currentIdx = TIMELINE.findIndex((s) => s.status === order.status);
 
   const photos = order.photos;
-  const messages = order.messages
-    .slice()
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const statusLine =
     order.status === "cancelado"
@@ -268,15 +260,8 @@ function GuestView() {
           vehicle={vehicle}
         />
 
-        {/* Messages — two-way */}
-        <MessagesTimeline
-          messages={messages}
-          onSend={(text) => {
-            addCustomerMessage(tenant.id, order, text);
-            toast.success("Mensaje enviado al taller");
-            load();
-          }}
-        />
+        {/* Questions → straight to the shop's WhatsApp, saying which car */}
+        <ContactShop order={order} tenant={tenant} vehicle={vehicle} />
 
     </ShopPage>
   );
@@ -740,7 +725,7 @@ function QuoteSection({
             <DialogTitle>¿No quieres hacer la reparación?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Avisaremos al taller. Si tienes dudas, también puedes escribirles abajo antes de decidir.
+            Avisaremos al taller. Si tienes dudas, puedes escribirles por WhatsApp antes de decidir.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectOpen(false)}>
@@ -774,69 +759,37 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ----------------------------- Messages ----------------------------- */
+/* ----------------------------- Contact ----------------------------- */
 
-function MessagesTimeline({
-  messages,
-  onSend,
+function ContactShop({
+  order,
+  tenant,
+  vehicle,
 }: {
-  messages: WorkOrder["messages"];
-  onSend: (text: string) => void;
+  order: WorkOrder;
+  tenant: Tenant;
+  vehicle?: Vehicle;
 }) {
-  const [text, setText] = useState("");
-
-  const send = () => {
-    const t = text.trim();
-    if (!t) return;
-    onSend(t);
-    setText("");
-  };
+  const number = websiteWhatsapp(tenant, getWebsiteSettings(tenant));
+  const text = customerToShopMessage({
+    vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model}` : undefined,
+    plate: vehicle?.plate,
+    code: order.accessCode,
+  });
 
   return (
     <section className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <MessageSquare strokeWidth={1.5} className="h-4 w-4" />
-        <h2 className="text-sm font-semibold text-foreground">Mensajes</h2>
-      </div>
-
-      {messages.length === 0 ? (
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Aún no hay mensajes.
-        </p>
-      ) : (
-        <ol className="mt-4 space-y-3">
-          {messages.map((m) => (
-            <li
-              key={m.id}
-              className={cn(
-                "rounded-lg p-3",
-                m.from === "customer"
-                  ? "ml-8 border border-border bg-background-subtle"
-                  : "mr-8 border border-border bg-card",
-              )}
-            >
-              <p className="text-sm text-foreground">{m.text}</p>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {m.from === "customer" ? "Tú" : "Taller"} ·{" "}
-                {formatDateTime(m.createdAt)}
-              </p>
-            </li>
-          ))}
-        </ol>
-      )}
-
-      <div className="mt-4 flex gap-2">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Escribe un mensaje a tu taller…"
-          className="min-h-[40px]"
-          maxLength={500}
-        />
-        <Button size="icon" onClick={send} className="shrink-0">
-          <Send strokeWidth={1.5} />
-        </Button>
-      </div>
+      <h2 className="text-sm font-semibold text-foreground">¿Tienes alguna duda?</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        Escríbenos por WhatsApp. El mensaje ya lleva tu coche y tu código, así sabemos enseguida
+        de qué nos hablas.
+      </p>
+      <Button asChild className="mt-4 h-11 w-full bg-[#25D366] text-white hover:bg-[#1ebe5b] sm:w-auto">
+        <a href={whatsappUrl(number, text)} target="_blank" rel="noreferrer">
+          <MessageCircle strokeWidth={1.75} />
+          Escríbenos por WhatsApp
+        </a>
+      </Button>
     </section>
   );
 }
