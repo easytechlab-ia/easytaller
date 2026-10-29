@@ -851,30 +851,11 @@ function ReviewSection({
   const [comment, setComment] = useState("");
   const [sent, setSent] = useState<number | null>(null);
 
-  // Already reviewed (persisted) → thank-you with the saved stars.
-  if (existing) {
-    return (
-      <section className="rounded-xl border border-border bg-card p-5">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Star strokeWidth={1.5} className="h-4 w-4" />
-          <h2 className="text-sm font-semibold text-foreground">
-            Tu valoración
-          </h2>
-        </div>
-        <p className="mt-3 text-sm text-foreground">Gracias por tu valoración.</p>
-        <div className="mt-2">
-          <StarRating value={existing.rating} size="sm" />
-        </div>
-        {existing.comment && (
-          <p className="mt-2 text-sm text-muted-foreground">{existing.comment}</p>
-        )}
-      </section>
-    );
-  }
-
-  // Just submitted in this session → confirmation + conditional CTA.
-  if (sent != null) {
-    const high = sent >= 4;
+  // Already rated (now or before) → thanks, and if it was 4–5 stars, the
+  // invitation to leave it on Google too.
+  const rated = sent ?? existing?.rating ?? null;
+  if (rated != null) {
+    const high = rated >= 4;
     return (
       <section className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center gap-2 text-muted-foreground">
@@ -884,7 +865,7 @@ function ReviewSection({
           </h2>
         </div>
         <div className="mt-3">
-          <StarRating value={sent} size="sm" />
+          <StarRating value={rated} size="sm" />
         </div>
         {high ? (
           tenant.googleReviewUrl ? (
