@@ -53,10 +53,8 @@ const MODULE_INFO: Record<
   { label: string; description: string }
 > = {
   presupuestos: { label: "Presupuestos", description: "Listado de presupuestos enviados y su aprobación." },
-  facturacion: { label: "Facturación", description: "Facturas de las reparaciones entregadas y cobros." },
+  facturacion: { label: "Facturación", description: "Datos de cada trabajo para que tu gestoría haga la factura." },
   equipo: { label: "Equipo", description: "Usuarios del taller y sus permisos." },
-  mensajes: { label: "Mensajes", description: "Bandeja de chat con los clientes por orden." },
-  agentes: { label: "Agentes", description: "Asistente que atiende la bandeja automáticamente. Requiere Mensajes." },
   recordatorios: { label: "Avisos", description: "Recordatorios de ITV, revisiones y vencimientos de documentos." },
   resenas: { label: "Reseñas", description: "Valoraciones de clientes tras la entrega." },
   reserva_online: { label: "Reserva online", description: "Asistente de cita en la página pública del taller." },
@@ -380,9 +378,7 @@ function ConfigPage() {
           <div className="space-y-2">
             {TOGGLEABLE_MODULES.map((m) => {
               const info = MODULE_INFO[m];
-              const mensajesOff = (enabledModules["mensajes"] ?? true) === false;
-              const blockedByDep = m === "agentes" && mensajesOff;
-              const on = blockedByDep ? false : enabledModules[m] ?? true;
+              const on = enabledModules[m] ?? true;
               return (
                 <div
                   key={m}
@@ -394,12 +390,10 @@ function ConfigPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {info.description}
-                      {blockedByDep && " (Mensajes está desactivado)"}
                     </p>
                   </div>
                   <Switch
                     checked={on}
-                    disabled={blockedByDep}
                     onCheckedChange={(v) =>
                       setEnabledModules((prev) => ({ ...prev, [m]: v }))
                     }

@@ -518,7 +518,9 @@ function VehicleDetail() {
         tenant={tenant}
         defaultCustomerId={vehicle.customerId}
         defaultVehicleId={vehicle.id}
-        onCreated={() => setVersion((v) => v + 1)}
+        onCreated={(order) =>
+          router.navigate({ to: "/app/ordenes/$id", params: { id: order.id }, search: { avisar: "recibido" } })
+        }
       />
 
       <ReminderFormDialog
