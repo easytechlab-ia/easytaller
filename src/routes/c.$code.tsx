@@ -850,6 +850,8 @@ function ReviewSection({
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
   const [sent, setSent] = useState<number | null>(null);
+  const [googleOpen, setGoogleOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Already rated (now or before) → thanks, and if it was 4–5 stars, the
   // invitation to leave it on Google too.
@@ -899,6 +901,49 @@ function ReviewSection({
             mejorar.
           </p>
         )}
+
+        {/* Right after a 4–5 star rating: a window that asks for the Google review. */}
+        <Dialog open={googleOpen} onOpenChange={setGoogleOpen}>
+          <DialogContent className="max-w-sm text-center">
+            <DialogHeader className="items-center text-center sm:text-center">
+              <div className="mx-auto mb-1 flex items-center gap-1 text-[#f5b301]">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Star key={n} strokeWidth={1.5} className="h-8 w-8" fill="currentColor" />
+                ))}
+              </div>
+              <DialogTitle className="text-xl">¡Gracias, nos alegra mucho!</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              ¿Nos ayudas con tu opinión en Google? Es lo que más ayuda a un taller de barrio y te
+              lleva menos de un minuto.
+            </p>
+            {copied && (
+              <p className="rounded-lg bg-background-subtle px-3 py-2 text-sm text-foreground">
+                Hemos copiado tu comentario: solo tienes que pegarlo.
+              </p>
+            )}
+            <div className="mt-1 grid gap-2">
+              <Button
+                asChild
+                className="h-12 text-base text-primary-foreground"
+                style={{ backgroundColor: accent }}
+              >
+                <a
+                  href={tenant.googleReviewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setGoogleOpen(false)}
+                >
+                  <Star strokeWidth={1.5} />
+                  Dejar mi reseña en Google
+                </a>
+              </Button>
+              <Button variant="ghost" onClick={() => setGoogleOpen(false)}>
+                Ahora no
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </section>
     );
   }
@@ -916,6 +961,17 @@ function ReviewSection({
       comment,
     });
     toast.success("¡Gracias por tu valoración!");
+    // Happy customer → open the Google window (and copy their comment so they
+    // only have to paste it).
+    if (rating >= 4 && tenant.googleReviewUrl) {
+      if (comment.trim()) {
+        navigator.clipboard?.writeText(comment.trim()).then(
+          () => setCopied(true),
+          () => setCopied(false),
+        );
+      }
+      setGoogleOpen(true);
+    }
     setSent(rating);
     onChanged();
   };
