@@ -14,8 +14,6 @@ export type AppModule =
   | "facturacion"
   | "servicios"
   | "stock"
-  | "mensajes"
-  | "agentes"
   | "recordatorios"
   | "resenas"
   | "equipo"
@@ -36,8 +34,6 @@ const ACCESS: Record<Role, AppModule[] | "all"> = {
     "facturacion",
     "servicios",
     "stock",
-    "mensajes",
-    "agentes",
     "recordatorios",
     "resenas",
   ],
@@ -74,8 +70,6 @@ export type ToggleableModule =
   | "presupuestos"
   | "facturacion"
   | "equipo"
-  | "mensajes"
-  | "agentes"
   | "recordatorios"
   | "resenas"
   | "reserva_online";
@@ -85,8 +79,6 @@ export const TOGGLEABLE_MODULES: ToggleableModule[] = [
   "presupuestos",
   "facturacion",
   "equipo",
-  "mensajes",
-  "agentes",
   "recordatorios",
   "resenas",
   "reserva_online",
@@ -118,10 +110,6 @@ export function isModuleEnabled(
   moduleKey: string,
 ): boolean {
   if (!TOGGLEABLE_SET.has(moduleKey)) return true;
-  // Agentes depends on Mensajes: if the inbox is off, agents are off too.
-  if (moduleKey === "agentes" && (tenant?.enabledModules?.mensajes ?? true) === false) {
-    return false;
-  }
   return tenant?.enabledModules?.[moduleKey] ?? true;
 }
 
@@ -137,8 +125,6 @@ export function moduleForPath(pathname: string): AppModule | null {
   if (p.startsWith("/app/facturacion")) return "facturacion";
   if (p.startsWith("/app/servicios")) return "servicios";
   if (p.startsWith("/app/stock")) return "stock";
-  if (p.startsWith("/app/mensajes")) return "mensajes";
-  if (p.startsWith("/app/agentes")) return "agentes";
   if (p.startsWith("/app/recordatorios")) return "recordatorios";
   if (p.startsWith("/app/resenas")) return "resenas";
   if (p.startsWith("/app/equipo")) return "equipo";

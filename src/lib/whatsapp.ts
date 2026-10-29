@@ -42,6 +42,80 @@ export function readyMessage(opts: {
   return lines.join("\n\n");
 }
 
+interface CarMessageOpts {
+  customerName?: string;
+  vehicleLabel?: string;
+  plate?: string;
+  tenantName: string;
+  trackingUrl?: string;
+}
+
+function greeting(customerName?: string): string {
+  const firstName = customerName?.split(" ")[0];
+  return firstName ? `¡Hola ${firstName}!` : "¡Hola!";
+}
+
+function carLabel(o: CarMessageOpts): string {
+  return o.vehicleLabel
+    ? `tu ${o.vehicleLabel}${o.plate ? ` (${o.plate})` : ""}`
+    : "tu coche";
+}
+
+/** Car just received: send the link where the customer follows the repair. */
+export function receivedMessage(o: CarMessageOpts): string {
+  return [
+    `${greeting(o.customerName)} Te escribimos de ${o.tenantName}: ya tenemos ${carLabel(o)} en el taller.`,
+    o.trackingUrl
+      ? `Aquí puedes ver cómo va en todo momento (estado, fotos y presupuesto): ${o.trackingUrl}`
+      : "",
+    "Te avisaremos por aquí en cuanto tengamos novedades.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Car handed back: thanks + summary and the car's history. */
+export function deliveredMessage(o: CarMessageOpts & { askReview?: boolean }): string {
+  return [
+    `${greeting(o.customerName)} Gracias por confiar en ${o.tenantName}.`,
+    o.trackingUrl
+      ? `Aquí tienes el resumen del trabajo y el historial de ${carLabel(o)}: ${o.trackingUrl}`
+      : "",
+    o.askReview ? "Si nos dejas tu opinión ahí mismo, nos ayudas mucho. 🙏" : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Any other moment: a short update on where the repair is. */
+export function progressMessage(
+  o: CarMessageOpts & { status: string; readyBy?: string },
+): string {
+  const car = carLabel(o);
+  const body: Record<string, string> = {
+    diagnostico: `Estamos revisando ${car} para ver qué necesita.`,
+    presupuesto_enviado: `Tienes pendiente el presupuesto de ${car}.`,
+    aprobado: `Ya tenemos tu aprobación: nos ponemos con ${car}.`,
+    en_reparacion: `Estamos trabajando en ${car}.`,
+  };
+  return [
+    `${greeting(o.customerName)} Te escribimos de ${o.tenantName}. ${body[o.status] ?? `Te contamos cómo va ${car}.`}${o.readyBy ? ` Lo tendremos listo el ${o.readyBy}.` : ""}`,
+    o.trackingUrl ? `Puedes verlo aquí: ${o.trackingUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** What the customer sends the shop from their repair page. */
+export function customerToShopMessage(o: {
+  vehicleLabel?: string;
+  plate?: string;
+  code: string;
+}): string {
+  const car = o.vehicleLabel ? `el ${o.vehicleLabel}${o.plate ? ` (${o.plate})` : ""}` : "mi coche";
+  return `Hola, os escribo por ${car}, código ${o.code}. `;
+}
+
 /** Message to send a quote: total and link to review and approve it. */
 export function quoteMessage(opts: {
   customerName?: string;
