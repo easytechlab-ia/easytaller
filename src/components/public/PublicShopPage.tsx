@@ -540,6 +540,23 @@ function Stars({ value }: { value: number }) {
 
 // ---- booking --------------------------------------------------------------------
 
+// For recording videos: open the page with ?video=1 and the booking form comes
+// already filled in (the service is still chosen by hand).
+const VIDEO_PREFILL =
+  typeof window !== "undefined" && new URLSearchParams(window.location.search).get("video") === "1"
+    ? {
+        plate: "1234 ABC",
+        make: "Seat",
+        model: "Ibiza",
+        date: "2026-11-04",
+        time: "10:00",
+        name: "Juan García López",
+        phone: "605322426",
+        email: "juangarcia@demo.com",
+        notes: "Le cuesta arrancar",
+      }
+    : null;
+
 function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[] }) {
   const [done, setDone] = useState(false);
   const [step, setStep] = useState(0);
@@ -547,15 +564,15 @@ function BookingForm({ tenant, services }: { tenant: Tenant; services: Service[]
   // Persistent wizard state (kept across steps).
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [unsure, setUnsure] = useState(false);
-  const [plate, setPlate] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [notes, setNotes] = useState("");
+  const [plate, setPlate] = useState(VIDEO_PREFILL?.plate ?? "");
+  const [make, setMake] = useState(VIDEO_PREFILL?.make ?? "");
+  const [model, setModel] = useState(VIDEO_PREFILL?.model ?? "");
+  const [date, setDate] = useState(VIDEO_PREFILL?.date ?? "");
+  const [time, setTime] = useState(VIDEO_PREFILL?.time ?? "");
+  const [name, setName] = useState(VIDEO_PREFILL?.name ?? "");
+  const [phone, setPhone] = useState(VIDEO_PREFILL?.phone ?? "");
+  const [email, setEmail] = useState(VIDEO_PREFILL?.email ?? "");
+  const [notes, setNotes] = useState(VIDEO_PREFILL?.notes ?? "");
   const [consent, setConsent] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
