@@ -163,6 +163,11 @@
     border-color: var(--color-border);
   }
 
+  /* Que las columnas de una rejilla no se ensanchen más que la pantalla en el móvil */
+  .grid > * {
+    min-width: 0;
+  }
+
   html {
     font-family: var(--font-sans);
   }
